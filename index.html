@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terra Endurance</title>
+  <meta name="description" content="An open-world endurance rally through living landscapes: Atlas Mountains & Sahara.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="hud-stage" class="panel">
+      <div class="stage-name" id="h-stage">—</div>
+      <div class="timer" id="h-timer">0:00.0</div>
+      <div class="row small"><span id="h-delta"></span><span id="h-pen"></span></div>
+    </div>
+    <div id="hud-nav" class="panel">
+      <canvas id="compass" width="460" height="54"></canvas>
+      <div class="nav-row"><span class="cap">CAP <b id="h-cap">---°</b></span><span id="h-wp">WP —</span><span id="h-dist">— km</span></div>
+    </div>
+    <div id="hud-env" class="panel">
+      <div><span class="lbl">TIME</span><b id="h-clock">07:00</b></div>
+      <div><span class="lbl">AIR</span><b id="h-temp">--°C</b></div>
+      <div><span class="lbl">WIND</span><b id="h-wind">--</b> <span id="h-windarrow" class="arrow">➤</span></div>
+      <div><span class="lbl">ALT</span><b id="h-alt">----</b> m</div>
+      <div><span class="lbl">POWER</span><b id="h-power">100%</b></div>
+      <div class="region" id="h-region">—</div>
+    </div>
+    <div id="minimap-wrap" class="panel"><canvas id="minimap" width="200" height="200"></canvas></div>
+    <div id="dash" class="panel">
+      <div class="dash-main">
+        <div class="speed"><b id="h-speed">0</b><span>km/h</span></div>
+        <div class="gear" id="h-gear">1</div>
+      </div>
+      <div class="rpm"><div id="h-rpm"></div></div>
+      <div class="gauges">
+        <div class="gauge"><span class="lbl">FUEL</span><div class="bar"><div id="h-fuel"></div></div><span id="h-fuel-t">--</span></div>
+        <div class="gauge"><span class="lbl">ENGINE</span><div class="bar temp"><div id="h-eng"></div></div><span id="h-eng-t">--°</span></div>
+      </div>
+      <div class="tyres">
+        <div class="tyre-grid"><i id="t0"></i><i id="t1"></i><i id="t2"></i><i id="t3"></i></div>
+        <div class="tyre-info"><span class="lbl">TYRES</span> <b id="h-press">2.2</b> bar <span id="h-press-t" class="small"></span><div class="small" id="h-spares"></div></div>
+      </div>
+      <div class="status-icons" id="h-icons"></div>
+      <div class="surface small" id="h-surface">—</div>
+    </div>
+    <div id="toasts"></div>
+    <div id="center-msg"></div>
+    <div id="region-banner"><div class="rb-name"></div><div class="rb-sub"></div></div>
+    <div id="prompt"></div>
+  </div>
+
+  <div id="loading" class="screen show">
+    <div class="logo">TERRA <span>ENDURANCE</span></div>
+    <div class="load-bar"><div id="load-fill"></div></div>
+    <div id="load-text">Preparing the world…</div>
+  </div>
+
+  <div id="title" class="screen">
+    <div class="logo">TERRA <span>ENDURANCE</span></div>
+    <div class="tagline">An open-world endurance rally through living landscapes</div>
+    <div id="world-cards"></div>
+    <div class="mode-row">
+      <button id="btn-rally" class="big">Start the rally</button>
+      <button id="btn-explore" class="big alt">Free roam &amp; explore</button>
+    </div>
+    <div class="mode-row small-row">
+      <button id="btn-journal-title">Field journal</button>
+      <button id="btn-help-title">Controls</button>
+      <button id="btn-settings-title">Settings</button>
+    </div>
+  </div>
+
+  <div id="briefing" class="screen">
+    <div class="card">
+      <div class="kicker" id="b-kicker">Stage 1 of 4</div>
+      <h1 id="b-name">—</h1>
+      <p id="b-brief"></p>
+      <div class="facts" id="b-facts"></div>
+      <div class="tip" id="b-tip"></div>
+      <button id="b-start" class="big">Go to the start line</button>
+    </div>
+  </div>
+
+  <div id="stage-end" class="screen">
+    <div class="card">
+      <div class="kicker" id="e-kicker">Stage complete</div>
+      <h1 id="e-name">—</h1>
+      <table id="e-table"></table>
+      <p class="small" id="e-note"></p>
+      <button id="e-next" class="big">Continue</button>
+    </div>
+  </div>
+
+  <div id="pause" class="screen">
+    <div class="card narrow">
+      <h1>Paused</h1>
+      <button id="p-resume" class="big">Resume</button>
+      <button id="p-journal">Field journal (J)</button>
+      <button id="p-map">Map (M)</button>
+      <button id="p-help">Controls</button>
+      <button id="p-settings">Settings</button>
+      <button id="p-quit" class="alt">Quit to title</button>
+    </div>
+  </div>
+
+  <div id="journal" class="screen">
+    <div class="card wide">
+      <div class="journal-head"><h1>Field journal</h1><span id="j-count"></span><button class="close" data-close>✕</button></div>
+      <div class="tabs"><button data-tab="fauna" class="active">Fauna</button><button data-tab="flora">Flora</button></div>
+      <div id="j-list"></div>
+    </div>
+  </div>
+
+  <div id="map" class="screen">
+    <div class="card wide map-card">
+      <div class="journal-head"><h1>Map</h1><span class="small">Route, waypoints and bivouacs</span><button class="close" data-close>✕</button></div>
+      <canvas id="map-canvas" width="600" height="900"></canvas>
+    </div>
+  </div>
+
+  <div id="help" class="screen">
+    <div class="card">
+      <div class="journal-head"><h1>Controls</h1><button class="close" data-close>✕</button></div>
+      <table class="keys">
+        <tr><td>W / ↑</td><td>Throttle</td><td>RT</td></tr>
+        <tr><td>S / ↓</td><td>Brake · reverse when stopped</td><td>LT</td></tr>
+        <tr><td>A D / ← →</td><td>Steer</td><td>Left stick</td></tr>
+        <tr><td>Space</td><td>Handbrake</td><td>A</td></tr>
+        <tr><td>1 · 2 · 3</td><td>Tyre pressure: sand 0.9 · mixed 1.5 · road 2.2 bar</td><td>D-pad ↓ ↑</td></tr>
+        <tr><td>Z / X</td><td>Deflate / inflate by 0.1 bar</td><td></td></tr>
+        <tr><td>E</td><td>Service: refuel &amp; repair at bivouacs and fuel trucks</td><td>X</td></tr>
+        <tr><td>F</td><td>Fit a spare tyre (stopped)</td><td>D-pad →</td></tr>
+        <tr><td>R</td><td>Recover vehicle (+30 s in rally)</td><td>B</td></tr>
+        <tr><td>C</td><td>Change camera · drag mouse to look around</td><td>Y · right stick</td></tr>
+        <tr><td>H</td><td>Headlights</td><td>D-pad ←</td></tr>
+        <tr><td>T</td><td>Traction assist on/off</td><td>RB</td></tr>
+        <tr><td>J · M</td><td>Field journal · Map</td><td>LB · Back</td></tr>
+        <tr><td>Esc / P</td><td>Pause</td><td>Start</td></tr>
+      </table>
+      <p class="small">Tips: deflate for soft sand — a wider contact patch sinks less. Thin, hot air costs power and cooling: watch the engine temperature when crawling up dunes. Never climb a dune's steep lee side (slip face): the sand rests at its angle of repose and will not hold you.</p>
+    </div>
+  </div>
+
+  <div id="settings" class="screen">
+    <div class="card narrow">
+      <div class="journal-head"><h1>Settings</h1><button class="close" data-close>✕</button></div>
+      <label>Graphics quality
+        <select id="s-quality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+      </label>
+      <label>View distance <input id="s-view" type="range" min="2000" max="7000" step="500"></label>
+      <label>Volume <input id="s-vol" type="range" min="0" max="1" step="0.05"></label>
+      <label class="check"><input id="s-tcs" type="checkbox"> Traction assist</label>
+      <label class="check"><input id="s-units" type="checkbox"> Imperial units</label>
+      <p class="small">Quality changes apply after returning to the title screen.</p>
+    </div>
+  </div>
+
+  <div id="error" class="screen"><div class="card"><h1>Something went wrong</h1><pre id="error-text"></pre></div></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
