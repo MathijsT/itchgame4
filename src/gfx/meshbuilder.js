@@ -7,7 +7,7 @@ export const LIMB = { NONE: 0, LEG: 1, WING: 2, HEAD: 3, TAIL: 4, FROND: 5 };
 
 export class MeshBuilder {
   constructor() {
-    this.pos = []; this.nrm = []; this.col = []; this.limb = [];
+    this.pos = []; this.nrm = []; this.col = []; this.limb = []; this.uv = [];
     this.curLimb = [0, 0, 0, 0];
     this.m = null; // current 3x4 transform (row-major [r00 r01 r02 tx, ...])
   }
@@ -46,7 +46,77 @@ export class MeshBuilder {
       this.nrm.push(nx, ny, nz);
       this.col.push(col[0], col[1], col[2]);
       this.limb.push(L[0], L[1], L[2], L[3]);
+      this.uv.push(-1, -1);
     }
+  }
+
+  // Textured foliage card: 4 corners (transformed), atlas tile, normals given
+  // explicitly (usually pointing out of the canopy for soft volumetric light).
+  card(p0, p1, p2, p3, tile, col, n) {
+    const P = [this._tp(...p0), this._tp(...p1), this._tp(...p2), this._tp(...p3)];
+    const UV = [[0.005, 0], [0.995, 0], [0.995, 1], [0.005, 1]]; // p0,p1 bottom edge; p2,p3 top edge (u kept inside the tile)
+    const L = this.curLimb;
+    const nn = n ? this._tn(n) : null;
+    for (const k of [0, 1, 2, 0, 2, 3]) {
+      const p = P[k];
+      this.pos.push(p[0], p[1], p[2]);
+      const nv = nn || [0, 1, 0];
+      this.nrm.push(nv[0], nv[1], nv[2]);
+      this.col.push(col[0], col[1], col[2]);
+      this.limb.push(L[0], L[1], L[2], L[3]);
+      this.uv.push(tile + UV[k][0], UV[k][1]);
+    }
+  }
+
+  _tn(n) {
+    if (!this.rot) return n;
+    const r = this.rot;
+    const x = r[0] * n[0] + r[1] * n[1] + r[2] * n[2], y = r[3] * n[0] + r[4] * n[1] + r[5] * n[2], z = r[6] * n[0] + r[7] * n[1] + r[8] * n[2];
+    const l = Math.hypot(x, y, z) || 1;
+    return [x / l, y / l, z / l];
+  }
+
+  mark() { return this.pos.length / 3; }
+
+  // Average normals of coincident vertices (from vertex index `from`) whose
+  // face normals differ by less than `creaseDeg`: smooth, rounded shading.
+  smooth(from = 0, creaseDeg = 70) {
+    const cosC = Math.cos((creaseDeg * Math.PI) / 180);
+    const n = this.pos.length / 3;
+    const groups = new Map();
+    for (let i = from; i < n; i++) {
+      const k = `${Math.round(this.pos[i * 3] * 1000)},${Math.round(this.pos[i * 3 + 1] * 1000)},${Math.round(this.pos[i * 3 + 2] * 1000)}`;
+      let g = groups.get(k);
+      if (!g) { g = []; groups.set(k, g); }
+      g.push(i);
+    }
+    const out = this.nrm.slice();
+    for (const g of groups.values()) {
+      for (const i of g) {
+        let x = 0, y = 0, z = 0;
+        for (const j of g) {
+          const d = this.nrm[i * 3] * this.nrm[j * 3] + this.nrm[i * 3 + 1] * this.nrm[j * 3 + 1] + this.nrm[i * 3 + 2] * this.nrm[j * 3 + 2];
+          if (d >= cosC) { x += this.nrm[j * 3]; y += this.nrm[j * 3 + 1]; z += this.nrm[j * 3 + 2]; }
+        }
+        const l = Math.hypot(x, y, z) || 1;
+        out[i * 3] = x / l; out[i * 3 + 1] = y / l; out[i * 3 + 2] = z / l;
+      }
+    }
+    this.nrm = out;
+    return this;
+  }
+
+  // Blend normals towards "away from centre" (foliage masses light like volumes)
+  radial(from, cx, cy, cz, k = 0.75) {
+    const n = this.pos.length / 3;
+    for (let i = from; i < n; i++) {
+      let x = this.pos[i * 3] - cx, y = (this.pos[i * 3 + 1] - cy) * 1.4, z = this.pos[i * 3 + 2] - cz;
+      const l = Math.hypot(x, y, z) || 1;
+      x = x / l * k + this.nrm[i * 3] * (1 - k); y = y / l * k + this.nrm[i * 3 + 1] * (1 - k); z = z / l * k + this.nrm[i * 3 + 2] * (1 - k);
+      const m = Math.hypot(x, y, z) || 1;
+      this.nrm[i * 3] = x / m; this.nrm[i * 3 + 1] = y / m; this.nrm[i * 3 + 2] = z / m;
+    }
+    return this;
   }
   tri(a, b, c, col) { this.triW(this._tp(...a), this._tp(...b), this._tp(...c), col); }
   quad(a, b, c, d, col) { this.tri(a, b, c, col); this.tri(a, c, d, col); }
@@ -121,22 +191,62 @@ export class MeshBuilder {
     let px = d[1] * u[2] - d[2] * u[1], py = d[2] * u[0] - d[0] * u[2], pz = d[0] * u[1] - d[1] * u[0];
     let l = Math.hypot(px, py, pz); px /= l; py /= l; pz /= l;
     const qx = d[1] * pz - d[2] * py, qy = d[2] * px - d[0] * pz, qz = d[0] * py - d[1] * px;
-    const ring = (c, r) => [0, 1, 2, 3].map((k) => {
-      const an = (k / 4) * Math.PI * 2 + Math.PI / 4;
+    const S = 6;
+    const ring = (c, r) => Array.from({ length: S }, (_, k) => k).map((k) => {
+      const an = (k / S) * Math.PI * 2 + Math.PI / 4;
       const cs = Math.cos(an) * r, sn = Math.sin(an) * r;
       return [c[0] + px * cs + qx * sn, c[1] + py * cs + qy * sn, c[2] + pz * cs + qz * sn];
     });
     const A = ring(a, r0), B = ring(b, r1);
-    for (let k = 0; k < 4; k++) {
-      const k1 = (k + 1) % 4;
+    for (let k = 0; k < S; k++) {
+      const k1 = (k + 1) % S;
       this.quad(A[k], A[k1], B[k1], B[k], col);
     }
-    this.tri(B[0], B[1], B[2], col); this.tri(B[0], B[2], B[3], col);
+    for (let k = 1; k < S - 1; k++) this.tri(B[0], B[k], B[k + 1], col);
     return this;
   }
 
+  // Loft a closed tube through cross-sections. Each section: {z, w, y0, y1, r}
+  // = half width, bottom/top heights and corner roundness (superellipse
+  // exponent). colFn(sectionIndex, u) picks colours (u: 0..1 around the ring).
+  loft(sections, ring = 20, colFn, capStart = true, capEnd = true) {
+    const pts = sections.map((sc) => {
+      const out = [];
+      const cy = (sc.y0 + sc.y1) / 2, hy = (sc.y1 - sc.y0) / 2;
+      const e = 2 / (sc.r ?? 4);
+      for (let k = 0; k < ring; k++) {
+        const a = (k / ring) * Math.PI * 2;
+        const c = Math.cos(a), s2 = Math.sin(a);
+        const x = Math.sign(c) * Math.pow(Math.abs(c), e) * sc.w * (s2 < 0 ? (sc.wb ?? 1) : 1);
+        const y = cy + Math.sign(s2) * Math.pow(Math.abs(s2), e) * hy;
+        out.push([x, y, sc.z]);
+      }
+      return out;
+    });
+    const from = this.mark();
+    for (let i = 0; i < pts.length - 1; i++) {
+      for (let k = 0; k < ring; k++) {
+        const k1 = (k + 1) % ring;
+        const col = colFn ? colFn(i, (k + 0.5) / ring, pts[i][k], pts[i + 1][k]) : [0.8, 0.8, 0.8];
+        // winding so normals face outwards for sections ordered front→back
+        this.quad(pts[i][k], pts[i + 1][k], pts[i + 1][k1], pts[i][k1], col);
+      }
+    }
+    const cap = (P, flip, col) => {
+      const c = P.reduce((a, p) => [a[0] + p[0] / P.length, a[1] + p[1] / P.length, a[2] + p[2] / P.length], [0, 0, 0]);
+      for (let k = 0; k < ring; k++) {
+        const k1 = (k + 1) % ring;
+        if (flip) this.tri(c, P[k1], P[k], col); else this.tri(c, P[k], P[k1], col);
+      }
+    };
+    const capCol = colFn ? colFn(-1, 0, pts[0][0], pts[0][0]) : [0.8, 0.8, 0.8];
+    if (capStart) cap(pts[0], false, capCol);
+    if (capEnd) cap(pts[pts.length - 1], true, capCol);
+    return from;
+  }
+
   merge(other) {
-    this.pos.push(...other.pos); this.nrm.push(...other.nrm); this.col.push(...other.col); this.limb.push(...other.limb);
+    this.pos.push(...other.pos); this.nrm.push(...other.nrm); this.col.push(...other.col); this.limb.push(...other.limb); this.uv.push(...other.uv);
     return this;
   }
 
@@ -148,6 +258,7 @@ export class MeshBuilder {
       nrm: new Float32Array(this.nrm),
       col: new Float32Array(this.col),
       limb: new Float32Array(this.limb),
+      uv: new Float32Array(this.uv),
       count: this.pos.length / 3,
     };
   }

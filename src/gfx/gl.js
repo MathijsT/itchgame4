@@ -1,7 +1,7 @@
 // Thin WebGL2 helpers: program compilation with #defines, buffers, VAOs.
 
 export function createContext(canvas) {
-  const gl = canvas.getContext('webgl2', { antialias: true, powerPreference: 'high-performance', alpha: false, preserveDrawingBuffer: false });
+  const gl = canvas.getContext('webgl2', { antialias: false, depth: false, powerPreference: 'high-performance', alpha: false, preserveDrawingBuffer: false });
   if (!gl) throw new Error('WebGL2 is not available in this browser.');
   return gl;
 }
@@ -22,7 +22,7 @@ function compile(gl, type, src, name) {
 export class Program {
   constructor(gl, vs, fs, defines = {}, name = 'program') {
     this.gl = gl;
-    const head = '#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2DShadow;\n' +
+    const head = '#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2DShadow;\nprecision highp sampler2DArray;\n' +
       Object.entries(defines).filter(([, v]) => v !== false).map(([k, v]) => `#define ${k} ${v === true ? '' : v}`).join('\n') + '\n';
     const p = gl.createProgram();
     gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, head + vs, name + '.vs'));

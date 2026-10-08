@@ -14,8 +14,8 @@ function quadruped(o) {
   const bodyY = legH + ry * 0.7;
   const col = o.col, belly = o.belly ?? col, legCol = o.legCol ?? shade(col, 0.85);
   // body: belly-coloured lower half
-  b.ellipsoid(0, bodyY, 0, rx, ry, L / 2, col, 8, 5, (i, j) => (j >= 3 ? belly : col));
-  if (o.hump) b.ellipsoid(0, bodyY + ry * 0.9, -L * 0.05, rx * 0.65, o.hump, L * 0.22, col, 6, 3);
+  b.ellipsoid(0, bodyY, 0, rx, ry, L / 2, col, 12, 8, (i, j) => (j >= 5 ? belly : col));
+  if (o.hump) b.ellipsoid(0, bodyY + ry * 0.9, -L * 0.05, rx * 0.65, o.hump, L * 0.22, col, 10, 6);
   // legs: diagonal pairs move together (trot / walk)
   const hipY = bodyY - ry * 0.2;
   const lr = o.legR ?? 0.06;
@@ -37,8 +37,10 @@ function quadruped(o) {
     b.limbSeg(neckBase, headPos, o.neckR ?? ry * 0.45, (o.neckR ?? ry * 0.45) * 0.7, col);
   }
   const hs = o.head;
-  b.ellipsoid(headPos[0], headPos[1], headPos[2] + hs[2] * 0.5, hs[0], hs[1], hs[2], o.headCol ?? col, 6, 4);
-  if (o.face) b.ellipsoid(0, headPos[1] - hs[1] * 0.1, headPos[2] + hs[2] * 1.25, hs[0] * 0.55, hs[1] * 0.6, hs[2] * 0.35, o.face, 5, 3);
+  b.ellipsoid(headPos[0], headPos[1], headPos[2] + hs[2] * 0.5, hs[0], hs[1], hs[2], o.headCol ?? col, 9, 6);
+  if (o.face) b.ellipsoid(0, headPos[1] - hs[1] * 0.1, headPos[2] + hs[2] * 1.25, hs[0] * 0.55, hs[1] * 0.6, hs[2] * 0.35, o.face, 7, 4);
+  // eyes
+  for (const sx of [-1, 1]) b.ellipsoid(sx * hs[0] * 0.75, headPos[1] + hs[1] * 0.25, headPos[2] + hs[2] * 0.9, hs[0] * 0.14, hs[0] * 0.14, hs[0] * 0.1, [0.04, 0.03, 0.03], 5, 3);
   if (o.extraHead) o.extraHead(b, headPos, hs);
   // tail
   if (o.tail) {
@@ -47,7 +49,7 @@ function quadruped(o) {
   }
   b.setLimb();
   if (o.extra) o.extra(b, { bodyY, L, rx, ry });
-  return b;
+  return b.smooth(0, 65);
 }
 
 function bird(o) {
@@ -55,7 +57,7 @@ function bird(o) {
   const col = o.col, wing = o.wingCol ?? col, tip = o.tipCol ?? wing;
   const span = o.span, bl = o.len;
   const y = 0;
-  b.ellipsoid(0, y, 0, bl * 0.16, bl * 0.16, bl * 0.45, col, 6, 4, (i, j) => (j >= 2 && o.belly ? o.belly : col));
+  b.ellipsoid(0, y, 0, bl * 0.16, bl * 0.16, bl * 0.45, col, 10, 7, (i, j) => (j >= 4 && o.belly ? o.belly : col));
   b.setLimb(LIMB.HEAD, 0, y, bl * 0.3);
   b.ellipsoid(0, y + bl * 0.06, bl * 0.48, bl * 0.11, bl * 0.11, bl * 0.13, o.headCol ?? col, 5, 3);
   b.limbSeg([0, y + bl * 0.04, bl * 0.58], [0, y + bl * 0.0, bl * 0.58 + (o.beakLen ?? bl * 0.12)], bl * 0.03, bl * 0.008, o.beak ?? [0.9, 0.75, 0.2]);
@@ -90,13 +92,13 @@ function bird(o) {
     }
     b.setLimb();
   }
-  return b;
+  return b.smooth(0, 65);
 }
 
 function lizard() {
   const b = new MeshBuilder();
   const col = [0.75, 0.62, 0.35], spots = [0.85, 0.55, 0.2];
-  b.ellipsoid(0, 0.06, 0, 0.07, 0.04, 0.16, col, 6, 3, (i) => (i % 2 ? col : spots));
+  b.ellipsoid(0, 0.06, 0, 0.07, 0.04, 0.16, col, 10, 6, (i) => (i % 2 ? col : spots));
   b.setLimb(LIMB.HEAD, 0, 0.06, 0.14);
   b.ellipsoid(0, 0.07, 0.2, 0.045, 0.035, 0.06, col, 5, 3);
   b.setLimb(LIMB.TAIL, 0, 0.05, -0.15);
@@ -106,7 +108,7 @@ function lizard() {
     b.limbSeg([sx * 0.06, 0.05, sz * 0.09], [sx * 0.12, 0.0, sz * 0.1], 0.015, 0.01, col);
   }
   b.setLimb();
-  return b;
+  return b.smooth(0, 65);
 }
 
 const horns = (col, curl = 1) => (b, hp, hs) => {

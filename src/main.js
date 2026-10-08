@@ -792,7 +792,7 @@ class Game {
     const f = {
       width: this.canvas.width, height: this.canvas.height,
       camPos: cam.pos, camDir: cam.dir, fov: cam.fov, far: this.streamer.viewDist * 1.5 + 2000,
-      env, time: this.time, dustColor: this.world.dustColor, head,
+      env, time: this.time, dt, dustColor: this.world.dustColor, head,
       chunks: this.streamer.chunks.values(), chunkSize: CHUNK,
       batches, objects, road: this.road, water: this.water, focus,
       particles: this.particles.count ? { data: this.particles.out, count: this.particles.count } : null,
@@ -800,7 +800,7 @@ class Game {
     // the renderer iterates chunks twice (shadow + main): materialise once
     f.chunks = Array.from(f.chunks);
     this.renderer.render(f);
-    void gl; void dt;
+    void gl;
   }
 }
 

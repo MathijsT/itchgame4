@@ -10,7 +10,9 @@ const SITE_FIELDS = ['zw', 'wMid', 'wHigh', 'wPre', 'wHam', 'wErg', 'mtn', 'mesa
 
 function buildChunk({ cx, cz, size, res }) {
   const sp = size / res;
-  const n = res + 1, ne = res + 3;
+  // border wide enough for ~24 m of ambient-occlusion horizon search
+  const B = Math.max(1, Math.min(12, Math.ceil(24 / sp)));
+  const n = res + 1, ne = res + 1 + 2 * B;
   const x0 = cx * size, z0 = cz * size;
   const H = new Float32Array(ne * ne);
   const fields = {};
@@ -18,12 +20,14 @@ function buildChunk({ cx, cz, size, res }) {
   const o = {};
   for (let j = 0; j < ne; j++) {
     for (let i = 0; i < ne; i++) {
-      const x = x0 + (i - 1) * sp, z = z0 + (j - 1) * sp;
-      const interior = i >= 1 && j >= 1 && i <= n && j <= n;
-      H[j * ne + i] = terrain.sample(x, z, o);
+      const x = x0 + (i - B) * sp, z = z0 + (j - B) * sp;
+      const interior = i >= B && j >= B && i < B + n && j < B + n;
       if (interior) {
-        const k = (j - 1) * n + (i - 1);
+        H[j * ne + i] = terrain.sample(x, z, o);
+        const k = (j - B) * n + (i - B);
         for (const f of SITE_FIELDS) fields[f][k] = o[f];
+      } else {
+        H[j * ne + i] = terrain.height(x, z);
       }
     }
   }
@@ -35,19 +39,32 @@ function buildChunk({ cx, cz, size, res }) {
   const det = new Uint8Array(vcount * 4);
   let minY = Infinity, maxY = -Infinity;
   const so = {};
+  const dirs = [[1, 0], [0.707, 0.707], [0, 1], [-0.707, 0.707], [-1, 0], [-0.707, -0.707], [0, -1], [0.707, -0.707]];
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
       const k = j * n + i;
-      const e = (j + 1) * ne + (i + 1);
+      const e = (j + B) * ne + (i + B);
       const h = H[e];
       const nx = H[e - 1] - H[e + 1], nz = H[e - ne] - H[e + ne], ny = 2 * sp;
       const l = Math.hypot(nx, ny, nz);
       pos[k * 3] = i * sp; pos[k * 3 + 1] = h; pos[k * 3 + 2] = j * sp;
       if (h < minY) minY = h; if (h > maxY) maxY = h;
       nrm[k * 4] = Math.round((nx / l) * 127); nrm[k * 4 + 1] = Math.round((ny / l) * 127); nrm[k * 4 + 2] = Math.round((nz / l) * 127);
+      // horizon-based ambient occlusion: how much sky each point can see
+      let occ = 0;
+      for (const [dx, dz] of dirs) {
+        let maxS = 0;
+        for (let st = 1; st <= B; st++) {
+          const ii = Math.round(i + B + dx * st), jj = Math.round(j + B + dz * st);
+          const s = (H[jj * ne + ii] - h) / (st * sp);
+          if (s > maxS) maxS = s;
+        }
+        occ += maxS / Math.sqrt(1 + maxS * maxS);
+      }
+      const ao = Math.max(0.25, 1 - (occ / dirs.length) * 1.1);
       for (const f of SITE_FIELDS) so[f] = fields[f][k];
       terrain.shade(x0 + i * sp, z0 + j * sp, so, ny / l);
-      col[k * 4] = Math.min(255, so.r * 255); col[k * 4 + 1] = Math.min(255, so.g * 255); col[k * 4 + 2] = Math.min(255, so.b * 255); col[k * 4 + 3] = so.surf;
+      col[k * 4] = Math.min(255, so.r * 255); col[k * 4 + 1] = Math.min(255, so.g * 255); col[k * 4 + 2] = Math.min(255, so.b * 255); col[k * 4 + 3] = Math.round(ao * 255);
       det[k * 4] = Math.min(255, so.dSand * 255); det[k * 4 + 1] = Math.min(255, so.dRock * 255);
       det[k * 4 + 2] = Math.min(255, so.dSnow * 255); det[k * 4 + 3] = Math.min(255, so.dVeg * 255);
     }

@@ -2,7 +2,7 @@
 // grows (density from the site: altitude, slope, water, region...), and its
 // low-poly model. Densities are evaluated in terrain workers.
 
-import { MeshBuilder, LIMB, jit, shade } from '../../gfx/meshbuilder.js';
+import { MeshBuilder, LIMB, jit } from '../../gfx/meshbuilder.js';
 import { smoothstep } from '../../core/noise.js';
 
 const band = (v, a0, a1, b0, b1) => smoothstep(a0, a1, v) * (1 - smoothstep(b0, b1, v));
@@ -10,112 +10,170 @@ const notRoad = (s) => (s.road > 0.05 || s.routeD < 7 || s.water > 0.05 || s.pad
 const BARK = [0.3, 0.22, 0.16], BARK_GREY = [0.42, 0.38, 0.33];
 
 // ---------- models ----------
+// Trunks and branches are smooth-shaded geometry; crowns are clusters of
+// alpha-tested foliage cards (see gfx/foliage.js) whose normals point out of
+// the crown so they light like a soft volume. LOD 1 uses fewer, larger cards.
+
+const T = { NEEDLE: 0, LEAF: 1, FROND: 2, GRASS: 3, ACACIA: 4, TAMARISK: 5, STRAW: 6, SCALE: 7 };
+
+// One foliage card centred at c, yaw a, tilt t (0 = upright, π/2 = lying flat)
+function card(b, c, half, a, t, tile, col, crown) {
+  const ux = Math.cos(a), uz = Math.sin(a);
+  const vx = -Math.sin(a) * Math.sin(t), vy = Math.cos(t), vz = Math.cos(a) * Math.sin(t);
+  const p0 = [c[0] - ux * half - vx * half, c[1] - vy * half, c[2] - uz * half - vz * half];
+  const p1 = [c[0] + ux * half - vx * half, c[1] - vy * half, c[2] + uz * half - vz * half];
+  const p2 = [c[0] + ux * half + vx * half, c[1] + vy * half, c[2] + uz * half + vz * half];
+  const p3 = [c[0] - ux * half + vx * half, c[1] + vy * half, c[2] - uz * half + vz * half];
+  let n;
+  if (crown) {
+    n = [c[0] - crown[0], (c[1] - crown[1]) * 1.3 + 0.35 * crown[3], c[2] - crown[2]];
+    const l = Math.hypot(...n) || 1; n = [n[0] / l, n[1] / l, n[2] / l];
+  } else n = [0, 1, 0];
+  b.card(p0, p1, p2, p3, tile, col, n);
+}
+
+// A clump: 2-3 crossed cards (gives volume from every angle)
+function clump(b, c, half, tile, col, crown, r, flat = 0.25, count = 2) {
+  const a0 = r() * Math.PI;
+  for (let k = 0; k < count; k++) card(b, c, half * (0.85 + 0.3 * Math.abs(r())), a0 + (k * Math.PI) / count, flat + r() * 0.35, tile, col, crown);
+}
+
+function shade3(c, f) { return [c[0] * f, c[1] * f, c[2] * f]; }
+
+function trunk(b, pts, r0, r1, col, seg = 7) {
+  const from = b.mark();
+  for (let i = 0; i < pts.length - 1; i++) {
+    const t0 = i / (pts.length - 1), t1 = (i + 1) / (pts.length - 1);
+    b.limbSeg(pts[i], pts[i + 1], r0 + (r1 - r0) * t0, r0 + (r1 - r0) * t1, col);
+  }
+  b.smooth(from, 80);
+  void seg;
+}
 
 function cedar(lod) {
   const b = new MeshBuilder();
-  const needle = [0.2, 0.31, 0.28], needleLight = [0.27, 0.39, 0.34];
-  b.cylinder(0, 0, 0, 14, 0.75, 0.35, lod ? 4 : 7, BARK, false);
-  if (lod) {
-    b.cylinder(0, 0, 4, 9, 5.5, 3.6, 5, needle, true, needleLight);
-    b.cone(0, 0, 9, 15, 4, 5, needle);
-    return b;
-  }
-  // the Atlas cedar's signature: flat, layered tiers of foliage
   const r = jit(7);
-  const tiers = [[4.2, 6.2], [7.0, 5.4], [9.6, 4.4], [12.0, 3.2], [14.0, 1.8]];
+  const needle = [0.36, 0.47, 0.44], needleDark = [0.24, 0.33, 0.31];
+  trunk(b, [[0, -0.3, 0], [0.1, 6, 0.05], [0, 12, 0], [0.05, 16, 0]], 0.75, 0.2, BARK);
+  // Atlas cedar's signature: flat tabular tiers of foliage
+  const tiers = lod ? [[5.5, 6.2], [9.5, 4.6], [13.5, 2.8]] : [[4.4, 6.6], [6.8, 6.0], [9.0, 5.0], [11.2, 3.9], [13.3, 2.8], [15.2, 1.6]];
   for (const [y, rad] of tiers) {
-    for (let k = 0; k < 3; k++) {
-      const a = k * 2.1 + r();
-      const ox = Math.cos(a) * rad * 0.35, oz = Math.sin(a) * rad * 0.35;
-      b.ellipsoid(ox, y, oz, rad * (0.75 + 0.15 * r()), 0.9, rad * (0.75 + 0.15 * r()), k === 0 ? needleLight : needle, 7, 3);
+    const crown = [0, y - 1.5, 0, 1];
+    if (!lod) {
+      // main limbs reaching each tier
+      for (let k = 0; k < 4; k++) {
+        const a = k * 1.57 + r() * 0.5;
+        b.limbSeg([0, y - 0.6, 0], [Math.cos(a) * rad * 0.8, y - 0.1 + r() * 0.3, Math.sin(a) * rad * 0.8], 0.16, 0.05, BARK);
+      }
+    }
+    const n = lod ? 5 : Math.round(8 + rad * 2.2);
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2 + r() * 0.4;
+      const d = rad * (0.25 + 0.7 * Math.sqrt(Math.abs(r())));
+      const c = [Math.cos(a) * d, y + r() * 0.35, Math.sin(a) * d];
+      const col = k % 3 === 0 ? needleDark : needle;
+      clump(b, c, lod ? rad * 0.55 : 1.5 + rad * 0.12, T.NEEDLE, col, crown, r, Math.PI / 2 - 0.35, lod ? 1 : 2);
     }
   }
-  b.cone(0, 0, 13, 16.5, 1.2, 6, needle);
   return b;
 }
 
 function holmOak(lod) {
   const b = new MeshBuilder();
-  const leaf = [0.17, 0.24, 0.12], leaf2 = [0.22, 0.29, 0.14];
-  b.cylinder(0, 0, 0, 3.2, 0.45, 0.3, lod ? 3 : 5, BARK_GREY, false);
-  if (lod) { b.ellipsoid(0, 5, 0, 4.2, 3.2, 4.2, leaf, 5, 3); return b; }
   const r = jit(3);
-  b.ellipsoid(0, 5.2, 0, 3.6, 2.8, 3.6, leaf, 8, 5);
+  const leaf = [0.27, 0.36, 0.2], leaf2 = [0.33, 0.42, 0.24];
+  trunk(b, [[0, -0.3, 0], [0.2, 2.2, 0.1], [0.1, 3.4, 0]], 0.45, 0.28, BARK_GREY);
   for (let k = 0; k < 4; k++) {
-    const a = k * 1.57 + r() * 0.5;
-    b.ellipsoid(Math.cos(a) * 2.4, 4.4 + r() * 0.6, Math.sin(a) * 2.4, 2.2, 1.9, 2.2, k % 2 ? leaf2 : leaf, 6, 4);
+    const a = k * 1.6 + r();
+    b.limbSeg([0.1, 3.0, 0], [Math.cos(a) * 2.2, 4.8 + r() * 0.8, Math.sin(a) * 2.2], 0.2, 0.07, BARK_GREY);
+  }
+  const crown = [0, 5.0, 0, 1];
+  const n = lod ? 10 : 46;
+  for (let k = 0; k < n; k++) {
+    const u = Math.abs(r()), a = r() * Math.PI;
+    const d = Math.cbrt(Math.abs(r()));
+    const c = [Math.cos(a * 2) * 3.8 * d, 5.0 + (u - 0.35) * 3.6, Math.sin(a * 2) * 3.8 * d];
+    clump(b, c, lod ? 2.2 : 1.25, T.LEAF, k % 2 ? leaf : leaf2, crown, r, 0.4);
   }
   return b;
 }
 
 function juniper(lod) {
   const b = new MeshBuilder();
-  const leaf = [0.19, 0.27, 0.17], leaf2 = [0.25, 0.32, 0.2];
-  b.limbSeg([0, 0, 0], [0.4, 2.5, 0.2], 0.55, 0.35, BARK);
-  b.limbSeg([0.4, 2.5, 0.2], [-0.3, 5, 0], 0.35, 0.2, BARK);
-  if (lod) { b.cylinder(0, 0, 2, 8, 2.8, 0.8, 5, leaf); return b; }
   const r = jit(11);
-  for (let k = 0; k < 6; k++) {
-    const y = 2.5 + k * 0.95;
-    const rad = 2.6 - k * 0.3;
-    b.ellipsoid(r() * 0.8, y, r() * 0.8, rad, 1.1, rad * (0.8 + 0.2 * r()), k % 2 ? leaf : leaf2, 6, 3);
+  const leaf = [0.3, 0.38, 0.27], leaf2 = [0.36, 0.43, 0.3];
+  trunk(b, [[0, -0.3, 0], [0.5, 1.6, 0.3], [0.1, 3.2, -0.2], [-0.3, 5.2, 0]], 0.6, 0.18, [0.38, 0.28, 0.22]);
+  b.limbSeg([0.5, 1.6, 0.3], [1.6, 3.4, 0.8], 0.25, 0.08, [0.38, 0.28, 0.22]);
+  const crown = [0, 4.2, 0, 1];
+  const n = lod ? 8 : 34;
+  for (let k = 0; k < n; k++) {
+    const y = 2.0 + Math.abs(r()) * 5.2;
+    const rad = 2.4 * (1 - (y - 2) / 6.5) + 0.4;
+    const a = r() * Math.PI * 2;
+    const c = [Math.cos(a) * rad * Math.abs(r()), y, Math.sin(a) * rad * Math.abs(r())];
+    clump(b, c, lod ? 1.6 : 0.95, T.SCALE, k % 2 ? leaf : leaf2, crown, r, 0.3);
   }
   return b;
 }
 
 function walnut(lod) {
   const b = new MeshBuilder();
-  const leaf = [0.25, 0.37, 0.14], leaf2 = [0.3, 0.42, 0.17];
-  b.cylinder(0, 0, 0, 4, 0.5, 0.35, 6, BARK_GREY, false);
-  if (lod) { b.ellipsoid(0, 6.5, 0, 5.5, 3.8, 5.5, leaf, 5, 3); return b; }
   const r = jit(5);
-  b.limbSeg([0, 3.5, 0], [2, 6, 0.5], 0.3, 0.15, BARK_GREY);
-  b.limbSeg([0, 3.5, 0], [-1.8, 6, -0.6], 0.3, 0.15, BARK_GREY);
-  b.ellipsoid(0, 7, 0, 4.4, 3.2, 4.4, leaf, 8, 5);
+  const leaf = [0.36, 0.48, 0.22], leaf2 = [0.42, 0.53, 0.26];
+  trunk(b, [[0, -0.3, 0], [0.1, 3.5, 0]], 0.5, 0.35, BARK_GREY);
   for (let k = 0; k < 5; k++) {
     const a = k * 1.25 + r() * 0.4;
-    b.ellipsoid(Math.cos(a) * 3.3, 6 + r(), Math.sin(a) * 3.3, 2.5, 2, 2.5, k % 2 ? leaf2 : leaf, 6, 4);
+    b.limbSeg([0, 3.3, 0], [Math.cos(a) * 3.0, 6.5 + r(), Math.sin(a) * 3.0], 0.25, 0.08, BARK_GREY);
+  }
+  const crown = [0, 7, 0, 1];
+  const n = lod ? 10 : 50;
+  for (let k = 0; k < n; k++) {
+    const d = Math.cbrt(Math.abs(r())), a = r() * Math.PI * 2;
+    const c = [Math.cos(a) * 4.8 * d, 7 + r() * 2.6, Math.sin(a) * 4.8 * d];
+    clump(b, c, lod ? 2.6 : 1.5, T.LEAF, k % 2 ? leaf : leaf2, crown, r, 0.35);
   }
   return b;
 }
 
 function datePalm(lod) {
   const b = new MeshBuilder();
-  const trunk = [0.42, 0.33, 0.24], trunkDark = [0.33, 0.25, 0.18];
-  const frond = [0.3, 0.42, 0.17], frondDry = [0.55, 0.5, 0.3];
-  const H = 13;
-  // slightly leaning, ringed trunk
-  for (let i = 0; i < (lod ? 2 : 6); i++) {
-    const n = lod ? 2 : 6;
-    const y0 = (i / n) * H, y1 = ((i + 1) / n) * H;
-    b.cylinder(0.04 * y0, 0, y0, y1, 0.42 - 0.02 * i, 0.38 - 0.02 * i, lod ? 5 : 7, i % 2 ? trunk : trunkDark, false);
-  }
-  const top = [0.04 * H, H, 0];
-  const nf = lod ? 5 : 14;
   const r = jit(13);
+  const trunkC = [0.46, 0.37, 0.27], trunkDark = [0.36, 0.28, 0.2];
+  const frond = [0.42, 0.52, 0.28], frondDry = [0.66, 0.58, 0.38];
+  const H = 13;
+  const from = b.mark();
+  const n = lod ? 3 : 10;
+  for (let i = 0; i < n; i++) {
+    const y0 = (i / n) * H, y1 = ((i + 1) / n) * H;
+    // the persistent leaf bases give the trunk its rough, ringed look
+    b.cylinder(0.04 * y0, 0, y0 - (i ? 0 : 0.3), y1, 0.42 - 0.015 * i + (i % 2) * 0.03, 0.4 - 0.015 * i, lod ? 6 : 9, i % 2 ? trunkC : trunkDark, false);
+  }
+  b.smooth(from, 60);
+  const top = [0.04 * H, H, 0];
+  const nf = lod ? 7 : 18;
   for (let k = 0; k < nf; k++) {
-    const a = (k / nf) * Math.PI * 2 + r() * 0.2;
-    const up = k % 3 === 0 ? 0.55 : 0.15 + 0.1 * r();
-    const len = 4.8 + r() * 0.6;
+    const a = (k / nf) * Math.PI * 2 + r() * 0.25;
+    const lift = k % 3 === 0 ? 0.9 : 0.25 + 0.25 * Math.abs(r());
+    const len = 5.2 + r() * 0.6;
     const ca = Math.cos(a), sa = Math.sin(a);
-    const mid = [top[0] + ca * len * 0.5, top[1] + up * len * 0.6 + 0.4, top[2] + sa * len * 0.5];
-    const end = [top[0] + ca * len, top[1] + up * len * 0.4 - 1.6, top[2] + sa * len];
-    const w = 0.7;
+    const col = k % 6 === 5 ? frondDry : frond;
+    // arching frond as two card segments: rising base, drooping tip
+    const mid = [top[0] + ca * len * 0.5, top[1] + lift * len * 0.45 + 0.3, top[2] + sa * len * 0.5];
+    const end = [top[0] + ca * len, top[1] + lift * len * 0.3 - 1.6, top[2] + sa * len];
+    const w = 0.85;
     const px = -sa * w, pz = ca * w;
-    const col = k % 5 === 4 ? frondDry : frond;
     b.setLimb(LIMB.FROND, a * 3, top[1], 0);
-    b.tri(top, [mid[0] + px, mid[1], mid[2] + pz], [mid[0] - px, mid[1], mid[2] - pz], col);
-    b.tri([mid[0] + px, mid[1], mid[2] + pz], end, [mid[0] - px, mid[1], mid[2] - pz], col);
-    // underside so fronds are visible from below
-    b.tri(top, [mid[0] - px, mid[1] - 0.05, mid[2] - pz], [mid[0] + px, mid[1] - 0.05, mid[2] + pz], shade(col, 0.8));
-    b.tri([mid[0] - px, mid[1] - 0.05, mid[2] - pz], end, [mid[0] + px, mid[1] - 0.05, mid[2] + pz], shade(col, 0.8));
+    const nUp = [ca * 0.4, 1, sa * 0.4];
+    b.card([top[0] - px * 0.4, top[1], top[2] - pz * 0.4], [top[0] + px * 0.4, top[1], top[2] + pz * 0.4], [mid[0] + px, mid[1], mid[2] + pz], [mid[0] - px, mid[1], mid[2] - pz], T.FROND, col, nUp);
+    b.card([mid[0] - px, mid[1], mid[2] - pz], [mid[0] + px, mid[1], mid[2] + pz], [end[0] + px * 0.3, end[1], end[2] + pz * 0.3], [end[0] - px * 0.3, end[1], end[2] - pz * 0.3], T.FROND, shade3(col, 0.95), nUp);
     b.setLimb();
   }
   if (!lod) {
-    // date clusters
-    for (let k = 0; k < 4; k++) {
-      const a = k * 1.6;
-      b.ellipsoid(top[0] + Math.cos(a) * 0.6, H - 0.8, Math.sin(a) * 0.6, 0.35, 0.6, 0.35, [0.75, 0.42, 0.12], 5, 3);
+    for (let k = 0; k < 5; k++) {
+      const a = k * 1.3;
+      const f = b.mark();
+      b.ellipsoid(top[0] + Math.cos(a) * 0.65, H - 1.0, Math.sin(a) * 0.65, 0.35, 0.7, 0.35, [0.72, 0.4, 0.12], 7, 5);
+      b.smooth(f, 80);
     }
   }
   return b;
@@ -123,78 +181,82 @@ function datePalm(lod) {
 
 function argan(lod) {
   const b = new MeshBuilder();
-  const leaf = [0.24, 0.3, 0.12], leaf2 = [0.3, 0.35, 0.15];
-  b.limbSeg([0, 0, 0], [0.6, 1.6, 0.3], 0.5, 0.4, BARK);
-  b.limbSeg([0.6, 1.6, 0.3], [2.2, 3.0, 0.8], 0.3, 0.15, BARK);
-  b.limbSeg([0.6, 1.6, 0.3], [-1.6, 3.1, -0.5], 0.3, 0.15, BARK);
-  b.limbSeg([0.6, 1.6, 0.3], [0.2, 3.2, -1.9], 0.25, 0.12, BARK);
-  if (lod) { b.ellipsoid(0.3, 3.7, 0, 4.2, 1.6, 3.8, leaf, 5, 3); return b; }
   const r = jit(17);
-  for (let k = 0; k < 7; k++) {
-    const a = k * 0.9 + r() * 0.3;
-    const d = k === 0 ? 0 : 2.6;
-    b.ellipsoid(0.3 + Math.cos(a) * d, 3.6 + r() * 0.5, Math.sin(a) * d, 2.2, 1.1, 2.2, k % 2 ? leaf2 : leaf, 6, 3);
+  const leaf = [0.3, 0.37, 0.18], leaf2 = [0.36, 0.42, 0.22];
+  trunk(b, [[0, -0.3, 0], [0.4, 1.0, 0.2], [0.6, 1.7, 0.3]], 0.5, 0.36, BARK);
+  for (const [x, y, z] of [[2.4, 3.0, 0.9], [-1.8, 3.1, -0.6], [0.2, 3.3, -2.1], [0.9, 3.4, 2.0], [-1.0, 3.2, 1.6]]) {
+    b.limbSeg([0.6, 1.7, 0.3], [x, y, z], 0.25, 0.08, BARK);
+  }
+  const crown = [0.3, 3.2, 0, 1];
+  const n = lod ? 9 : 40;
+  for (let k = 0; k < n; k++) {
+    const d = Math.sqrt(Math.abs(r())), a = r() * Math.PI * 2;
+    const c = [0.3 + Math.cos(a) * 4.0 * d, 3.6 + r() * 0.8, Math.sin(a) * 3.6 * d];
+    clump(b, c, lod ? 2.0 : 1.15, T.LEAF, k % 2 ? leaf : leaf2, crown, r, 0.9);
   }
   return b;
 }
 
 function acacia(lod) {
   const b = new MeshBuilder();
-  const leaf = [0.42, 0.45, 0.24], leaf2 = [0.36, 0.4, 0.2];
-  b.limbSeg([0, 0, 0], [0.2, 2.2, 0], 0.28, 0.22, BARK_GREY);
-  b.limbSeg([0.2, 2.2, 0], [2.0, 4.4, 0.6], 0.18, 0.1, BARK_GREY);
-  b.limbSeg([0.2, 2.2, 0], [-1.7, 4.3, -0.4], 0.18, 0.1, BARK_GREY);
-  b.limbSeg([0.2, 2.2, 0], [0.3, 4.5, 1.8], 0.15, 0.08, BARK_GREY);
-  // the classic flat-topped umbrella crown
-  if (lod) { b.ellipsoid(0, 4.7, 0, 4.4, 0.6, 4.4, leaf, 6, 2); return b; }
   const r = jit(19);
-  for (let k = 0; k < 6; k++) {
-    const a = k * 1.05 + r() * 0.3;
-    const d = k === 0 ? 0 : 2.5;
-    b.ellipsoid(Math.cos(a) * d, 4.7 + r() * 0.2, Math.sin(a) * d, 2.4, 0.45, 2.4, k % 2 ? leaf2 : leaf, 7, 2);
+  const leaf = [0.5, 0.54, 0.3], leaf2 = [0.44, 0.49, 0.27];
+  trunk(b, [[0, -0.3, 0], [0.25, 1.4, 0.05], [0.2, 2.3, 0]], 0.3, 0.22, BARK_GREY);
+  const tips = [[2.4, 4.4, 0.7], [-2.0, 4.3, -0.5], [0.3, 4.5, 2.2], [-0.4, 4.4, -2.3], [1.6, 4.6, -1.6]];
+  for (const t of tips) b.limbSeg([0.2, 2.3, 0], t, 0.16, 0.06, BARK_GREY);
+  // flat umbrella crown: horizontal cards in two thin layers
+  const crown = [0, 3.8, 0, 1];
+  const n = lod ? 7 : 34;
+  for (let k = 0; k < n; k++) {
+    const d = Math.sqrt(Math.abs(r())), a = r() * Math.PI * 2;
+    const c = [Math.cos(a) * 4.4 * d, 4.65 + (k % 2) * 0.35 + r() * 0.12, Math.sin(a) * 4.4 * d];
+    clump(b, c, lod ? 2.4 : 1.35, T.ACACIA, k % 2 ? leaf : leaf2, crown, r, Math.PI / 2 - 0.12, lod ? 1 : 2);
   }
   return b;
 }
 
 function tamarisk(lod) {
   const b = new MeshBuilder();
-  const leaf = [0.47, 0.52, 0.42], leaf2 = [0.55, 0.57, 0.48];
   const r = jit(23);
-  for (let k = 0; k < (lod ? 2 : 5); k++) {
+  const leaf = [0.58, 0.62, 0.52], leaf2 = [0.64, 0.66, 0.56];
+  for (let k = 0; k < 5; k++) {
     const a = k * 1.3 + r();
-    const x = Math.cos(a) * 1.2, z = Math.sin(a) * 1.2;
-    if (!lod) b.limbSeg([0, 0, 0], [x * 0.8, 1.6, z * 0.8], 0.12, 0.08, BARK);
-    b.ellipsoid(x, 2.4 + r() * 0.5, z, 1.7, 1.6, 1.7, k % 2 ? leaf : leaf2, 6, 4);
+    b.limbSeg([0, -0.2, 0], [Math.cos(a) * 0.9, 2.0, Math.sin(a) * 0.9], 0.12, 0.05, BARK);
+  }
+  const crown = [0, 2.2, 0, 1];
+  const n = lod ? 6 : 26;
+  for (let k = 0; k < n; k++) {
+    const d = Math.sqrt(Math.abs(r())), a = r() * Math.PI * 2;
+    clump(b, [Math.cos(a) * 1.9 * d, 1.6 + Math.abs(r()) * 2.2, Math.sin(a) * 1.9 * d], lod ? 1.6 : 0.95, T.TAMARISK, k % 2 ? leaf : leaf2, crown, r, 0.1);
   }
   return b;
 }
 
 function oleander() {
   const b = new MeshBuilder();
-  const leaf = [0.16, 0.3, 0.14], pink = [0.92, 0.45, 0.6];
   const r = jit(29);
-  for (let k = 0; k < 4; k++) {
-    const a = k * 1.6 + r();
-    b.ellipsoid(Math.cos(a) * 0.8, 1.1 + r() * 0.3, Math.sin(a) * 0.8, 1.0, 0.9, 1.0, leaf, 6, 3);
+  const leaf = [0.24, 0.38, 0.2], pink = [0.95, 0.5, 0.65];
+  const crown = [0, 1.1, 0, 1];
+  for (let k = 0; k < 14; k++) {
+    const a = r() * Math.PI * 2, d = Math.abs(r()) * 0.9;
+    clump(b, [Math.cos(a) * d, 0.7 + Math.abs(r()) * 1.1, Math.sin(a) * d], 0.6, T.LEAF, leaf, crown, r, 0.2);
   }
-  for (let k = 0; k < 12; k++) {
-    const a = k * 2.4, d = 0.6 + 0.9 * Math.abs(r());
-    b.box(Math.cos(a) * d, 1.6 + r() * 0.5, Math.sin(a) * d, 0.12, 0.12, 0.12, pink);
+  for (let k = 0; k < 16; k++) {
+    const a = k * 2.4, d = 0.5 + 0.8 * Math.abs(r());
+    const f = b.mark();
+    b.ellipsoid(Math.cos(a) * d, 1.6 + r() * 0.4, Math.sin(a) * d, 0.11, 0.08, 0.11, pink, 5, 3);
+    b.smooth(f, 90);
   }
   return b;
 }
 
-function tussock(colA, colB, h = 0.9, blades = 9) {
+function tussock(col, _unused, h = 0.9, blades = 9) {
   const b = new MeshBuilder();
-  const r = jit(31);
-  for (let k = 0; k < blades; k++) {
-    const a = (k / blades) * Math.PI * 2;
-    const lean = 0.35 + 0.15 * r();
-    const tip = [Math.cos(a) * lean * h, h * (0.8 + 0.3 * r()), Math.sin(a) * lean * h];
-    const w = 0.07;
-    b.setLimb(LIMB.FROND, a, 0, 0);
-    b.tri([-Math.sin(a) * w, 0, Math.cos(a) * w], [Math.sin(a) * w, 0, -Math.cos(a) * w], tip, k % 2 ? colA : colB);
-    b.tri([Math.sin(a) * w, 0, -Math.cos(a) * w], [-Math.sin(a) * w, 0, Math.cos(a) * w], tip, k % 2 ? colA : colB);
+  const r = jit(31 + blades);
+  b.setLimb(LIMB.FROND, 0, 0, 0);
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI + r() * 0.3;
+    card(b, [0, h * 0.5, 0], h * 0.62, a, 0.05, T.STRAW, col, [0, -h, 0, 0]);
   }
   b.setLimb();
   return b;
@@ -202,37 +264,45 @@ function tussock(colA, colB, h = 0.9, blades = 9) {
 
 function calligonum() {
   const b = new MeshBuilder();
-  const stem = [0.45, 0.48, 0.3], wood = [0.45, 0.35, 0.25];
   const r = jit(37);
+  const stem = [0.5, 0.52, 0.34], wood = [0.45, 0.35, 0.25];
   for (let k = 0; k < 9; k++) {
     const a = k * 0.7 + r() * 0.3;
     const d = 0.6 + 0.5 * r();
-    b.limbSeg([0, 0, 0], [Math.cos(a) * d, 1.3 + 0.5 * r(), Math.sin(a) * d], 0.06, 0.03, k % 3 ? stem : wood);
+    b.limbSeg([0, 0, 0], [Math.cos(a) * d, 1.3 + 0.5 * r(), Math.sin(a) * d], 0.05, 0.02, k % 3 ? stem : wood);
   }
-  b.ellipsoid(0, 1.1, 0, 1.0, 0.6, 1.0, [0.5, 0.5, 0.33], 5, 3);
+  const crown = [0, 0.9, 0, 1];
+  for (let k = 0; k < 8; k++) {
+    const a = r() * Math.PI * 2;
+    clump(b, [Math.cos(a) * 0.6, 0.9 + Math.abs(r()) * 0.8, Math.sin(a) * 0.6], 0.6, T.TAMARISK, stem, crown, r, 0.15);
+  }
   return b;
 }
 
 function euphorbia() {
   const b = new MeshBuilder();
-  const g = [0.42, 0.5, 0.38], g2 = [0.5, 0.56, 0.42];
+  const g = [0.46, 0.53, 0.42], g2 = [0.53, 0.58, 0.45];
   const r = jit(41);
-  for (let k = 0; k < 16; k++) {
-    const a = k * 2.399, d = Math.sqrt(k) * 0.22;
-    const hgt = 0.7 - d * 0.35 + 0.1 * r();
-    b.cylinder(Math.cos(a) * d, Math.sin(a) * d, 0, hgt, 0.08, 0.07, 4, k % 2 ? g : g2, true, [0.75, 0.62, 0.3]);
+  const from = b.mark();
+  for (let k = 0; k < 22; k++) {
+    const a = k * 2.399, d = Math.sqrt(k) * 0.2;
+    const hgt = 0.75 - d * 0.35 + 0.1 * r();
+    b.cylinder(Math.cos(a) * d, Math.sin(a) * d, 0, hgt, 0.075, 0.065, 5, k % 2 ? g : g2, true, [0.78, 0.66, 0.34]);
   }
+  b.smooth(from, 75);
   return b;
 }
 
 function pricklyPear() {
   const b = new MeshBuilder();
-  const g = [0.3, 0.45, 0.2], g2 = [0.36, 0.5, 0.22], fruit = [0.85, 0.3, 0.25];
+  const g = [0.33, 0.47, 0.24], g2 = [0.38, 0.52, 0.26], fruit = [0.85, 0.32, 0.25];
   const r = jit(43);
   const pad = (x, y, z, ry, rz, s) => {
     b.setTransform(x, y, z, ry, 0, rz);
-    b.ellipsoid(0, 0, 0, 0.32 * s, 0.42 * s, 0.07 * s, r() > 0 ? g : g2, 6, 3);
-    b.box(0, 0.42 * s, 0, 0.05, 0.05, 0.05, fruit);
+    const f = b.mark();
+    b.ellipsoid(0, 0, 0, 0.32 * s, 0.42 * s, 0.07 * s, r() > 0 ? g : g2, 10, 6);
+    b.smooth(f, 85);
+    b.ellipsoid(0, 0.43 * s, 0, 0.05, 0.06, 0.05, fruit, 5, 3);
     b.resetTransform();
   };
   pad(0, 0.4, 0, 0, 0, 1.1);
@@ -246,29 +316,58 @@ function pricklyPear() {
 
 function atlasDaisy() {
   const b = new MeshBuilder();
-  const leaf = [0.3, 0.42, 0.2], white = [0.95, 0.94, 0.9], red = [0.75, 0.15, 0.15], eye = [0.95, 0.75, 0.1];
+  const leaf = [0.32, 0.44, 0.22], white = [0.96, 0.95, 0.92], red = [0.75, 0.15, 0.15], eye = [0.95, 0.75, 0.1];
   const r = jit(47);
-  b.ellipsoid(0, 0.04, 0, 0.25, 0.06, 0.25, leaf, 6, 2);
+  card(b, [0, 0.12, 0], 0.18, 0, 0.1, T.GRASS, leaf, [0, -0.2, 0, 0]);
+  card(b, [0, 0.12, 0], 0.18, 1.57, 0.1, T.GRASS, leaf, [0, -0.2, 0, 0]);
   for (let k = 0; k < 5; k++) {
-    const a = k * 1.256 + r() * 0.3, d = 0.18;
+    const a = k * 1.256 + r() * 0.3, d = 0.14;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    // prostrate flower heads: white rays, red undersides, yellow disc
-    b.cylinder(x, z, 0.05, 0.08, 0.08, 0.075, 6, red, true, white);
-    b.box(x, 0.085, z, 0.025, 0.01, 0.025, eye);
+    b.cylinder(x, z, 0.12, 0.15, 0.055, 0.05, 8, red, true, white);
+    b.cylinder(x, z, 0.15, 0.162, 0.016, 0.012, 6, eye, true, eye);
   }
   return b;
 }
 
 function grassClump() {
-  return tussock([0.36, 0.45, 0.2], [0.42, 0.5, 0.24], 0.45, 7);
+  const b = new MeshBuilder();
+  const r = jit(59);
+  b.setLimb(LIMB.FROND, 0, 0, 0);
+  for (let k = 0; k < 3; k++) card(b, [r() * 0.15, 0.32, r() * 0.15], 0.38, (k / 3) * Math.PI + r() * 0.3, 0.05, T.GRASS, [0.46, 0.56, 0.28], [0, -0.5, 0, 0]);
+  b.setLimb();
+  return b;
 }
 
+// Boulder: a noise-displaced sphere, smooth-shaded with sharp-ish creases
 function boulder(lod) {
   const b = new MeshBuilder();
+  const c = [0.86, 0.86, 0.86];
+  const from = b.mark();
+  b.ellipsoid(0, 0.45, 0, 1.3, 0.95, 1.05, c, lod ? 7 : 12, lod ? 5 : 8);
   const r = jit(53);
-  const c = [0.85, 0.85, 0.85], c2 = [0.75, 0.75, 0.75];
-  b.ellipsoid(0, 0.5, 0, 1.3, 0.95, 1.0, c, lod ? 5 : 6, lod ? 3 : 4, (i, j) => ((i + j) % 2 ? c : c2));
-  if (!lod) b.ellipsoid(0.8 + r() * 0.2, 0.3, 0.4, 0.7, 0.5, 0.6, c2, 5, 3);
+  const disp = new Map();
+  for (let i = from; i < b.pos.length / 3; i++) {
+    const x = b.pos[i * 3], y = b.pos[i * 3 + 1], z = b.pos[i * 3 + 2];
+    const k = `${Math.round(x * 1000)},${Math.round(y * 1000)},${Math.round(z * 1000)}`;
+    let d = disp.get(k);
+    if (d === undefined) {
+      // faceted rock: flatten the base, chip the shape with a few planes
+      d = 1 + 0.16 * Math.sin(x * 3.1 + z * 1.7) + 0.1 * Math.sin(y * 5.3 + x * 2.2) + r() * 0.05;
+      disp.set(k, d);
+    }
+    b.pos[i * 3] = x * d; b.pos[i * 3 + 2] = z * d;
+    b.pos[i * 3 + 1] = Math.max(0.0, (y - 0.45) * d + 0.45) - 0.05;
+  }
+  // recompute face normals after displacement, then smooth
+  for (let i = from; i < b.pos.length / 3; i += 3) {
+    const P = (j) => [b.pos[j * 3], b.pos[j * 3 + 1], b.pos[j * 3 + 2]];
+    const A = P(i), B = P(i + 1), C = P(i + 2);
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+    for (let k = 0; k < 3; k++) { b.nrm[(i + k) * 3] = nx; b.nrm[(i + k) * 3 + 1] = ny; b.nrm[(i + k) * 3 + 2] = nz; }
+  }
+  b.smooth(from, 40);
   return b;
 }
 
@@ -350,14 +449,14 @@ export const FLORA = [
     fact: 'Also called halfa. These tough tussocks bind the soils of the steppes and have been woven into baskets, mats and rope for millennia.',
     spacing: 4, maxP: 0.45, scale: [0.7, 1.3], range: 130, sway: 1.0,
     density: (s) => notRoad(s) * (s.wHigh * (1 - smoothstep(2400, 2800, s.h)) + s.wPre + s.wHam * 0.4) * (1 - smoothstep(0.45, 0.7, s.slope)) * smoothstep(-0.5, 0.2, s.clump2),
-    model: () => tussock([0.72, 0.66, 0.42], [0.62, 0.58, 0.36], 0.9, 11),
+    model: () => tussock([0.74, 0.68, 0.46], null, 0.9, 11),
   },
   {
     id: 'drinn', name: 'Drinn grass', latin: 'Stipagrostis pungens', kind: 'grass',
     fact: 'One of the few plants that can live on moving dunes: its roots run many metres through the sand and it keeps growing upward as sand buries it.',
     spacing: 7, maxP: 0.35, scale: [0.7, 1.5], range: 160, sway: 1.0,
     density: (s) => notRoad(s) * s.wErg * (1 - smoothstep(0.35, 0.7, s.duneRel)) * smoothstep(-0.3, 0.4, s.clump2),
-    model: () => tussock([0.78, 0.72, 0.5], [0.66, 0.64, 0.42], 1.1, 13),
+    model: () => tussock([0.8, 0.74, 0.52], null, 1.1, 13),
   },
   {
     id: 'calligonum', name: 'Calligonum', latin: 'Calligonum comosum', kind: 'shrub',
