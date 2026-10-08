@@ -447,7 +447,7 @@ export const FLORA = [
   {
     id: 'esparto', name: 'Esparto grass', latin: 'Macrochloa tenacissima', kind: 'grass',
     fact: 'Also called halfa. These tough tussocks bind the soils of the steppes and have been woven into baskets, mats and rope for millennia.',
-    spacing: 4, maxP: 0.45, scale: [0.7, 1.3], range: 130, sway: 1.0,
+    spacing: 3.2, maxP: 0.55, scale: [0.7, 1.3], range: 150, sway: 1.0,
     density: (s) => notRoad(s) * (s.wHigh * (1 - smoothstep(2400, 2800, s.h)) + s.wPre + s.wHam * 0.4) * (1 - smoothstep(0.45, 0.7, s.slope)) * smoothstep(-0.5, 0.2, s.clump2),
     model: () => tussock([0.74, 0.68, 0.46], null, 0.9, 11),
   },
@@ -495,7 +495,7 @@ export const FLORA = [
   {
     id: 'boulder', name: 'Boulders', latin: '', kind: 'rock', hidden: true,
     spacing: 12, maxP: 0.5, scale: [0.4, 2.4], collide: 1.0, range: 250, farRange: 700, rockTint: true,
-    density: (s) => notRoad(s) * (smoothstep(0.25, 0.5, s.slope) * 0.25 + s.wHam * 0.06 + s.wHigh * 0.05 + s.wPre * 0.05 + s.mesa * 0.03) * (1 - s.wErg * 0.9),
+    density: (s) => notRoad(s) * (smoothstep(0.25, 0.5, s.slope) * 0.25 + s.wHam * 0.06 + s.wHigh * 0.14 + s.wPre * 0.07 + s.mesa * 0.03) * (1 - s.wErg * 0.9),
     model: boulder,
   },
 ];

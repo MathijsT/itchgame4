@@ -508,6 +508,7 @@ class Game {
     if (I.hit('KeyJ', 'Pad_LB')) { this.hud.show(false); this.openJournal(); return; }
     if (I.hit('KeyM', 'Pad_Back')) { this.hud.show(false); this.openMap(); return; }
     if (I.hit('KeyC', 'Pad_Y')) this.camera.cycle();
+    if (I.hit('F3')) this.showFps = !this.showFps;
     if (I.hit('KeyH', 'Pad_Left')) v.headlights = !v.headlights;
     if (I.hit('KeyT', 'Pad_RB')) { v.tractionAssist = !v.tractionAssist; this.hud.toast('', `Traction assist ${v.tractionAssist ? 'on' : 'off'}`, { ms: 1800 }); }
     const setP = (p, label) => { v.targetPressure = clamp(p, 0.8, 2.6); this.hud.toast('', `Tyres → ${v.targetPressure.toFixed(1)} bar${label ? ` (${label})` : ''}`, { ms: 2000 }); };
@@ -535,6 +536,15 @@ class Game {
 
   frame(dt) {
     const I = this.input;
+    this.fpsAcc = (this.fpsAcc || 0) + dt; this.fpsN = (this.fpsN || 0) + 1;
+    if (this.fpsAcc > 0.5) {
+      const el = document.getElementById('fps');
+      if (el) {
+        el.style.display = this.showFps ? 'block' : 'none';
+        el.textContent = `${Math.round(this.fpsN / this.fpsAcc)} fps · ${Math.round((this.renderer.renderScale || 1) * 100)}% res · ${this.renderer.stats.draws} draws`;
+      }
+      this.fpsAcc = 0; this.fpsN = 0;
+    }
     I.update(dt);
     const gl = this.gl;
     const env = this.env;
@@ -794,7 +804,7 @@ class Game {
     const f = {
       width: this.canvas.width, height: this.canvas.height,
       camPos: cam.pos, camDir: cam.dir, fov: cam.fov, far: this.streamer.viewDist * 1.5 + 2000,
-      env, time: this.time, dt, dustColor: this.world.dustColor, head,
+      env, time: this.time, dt, dustColor: this.world.dustColor, head, noDynRes: !!window.__noDynRes,
       chunks: this.streamer.chunks.values(), chunkSize: CHUNK,
       batches, objects, road: this.road, water: this.water, focus,
       particles: this.particles.count ? { data: this.particles.out, count: this.particles.count } : null,

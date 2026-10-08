@@ -44,7 +44,7 @@ const WIND_DIR = (() => { const a = -0.35; return [Math.sin(a), Math.cos(a)]; })
 // [r,g,b] sRGB palette
 const C = {
   asphalt: [0.2, 0.2, 0.21], forestShade: [0.15, 0.2, 0.11], piste: [0.66, 0.56, 0.43], pisteRed: [0.66, 0.46, 0.34],
-  forest: [0.27, 0.31, 0.16], meadow: [0.4, 0.45, 0.2], dryGrass: [0.56, 0.5, 0.32],
+  forest: [0.27, 0.31, 0.16], meadow: [0.4, 0.45, 0.2], dryGrass: [0.52, 0.45, 0.3],
   limestone: [0.6, 0.56, 0.5], redRock: [0.6, 0.36, 0.26], darkRock: [0.36, 0.3, 0.27],
   reg: [0.38, 0.29, 0.22], regLight: [0.55, 0.43, 0.32], paleSand: [0.82, 0.66, 0.46],
   ergSand: [0.86, 0.53, 0.3], ergSandLight: [0.92, 0.66, 0.42], snow: [0.94, 0.95, 0.98],
@@ -332,6 +332,9 @@ export class MoroccoTerrain {
       const rock = lerp(C.limestone[0], C.redRock[0], smoothstep(9000, 12500, o.zw));
       const rc = [rock, lerp(C.limestone[1], C.redRock[1], smoothstep(9000, 12500, o.zw)), lerp(C.limestone[2], C.redRock[2], smoothstep(9000, 12500, o.zw))];
       layer(SURF.SOIL, C.dryGrass, o.wHigh * 0.8);
+      // limestone outcrops and scree break up the steppe
+      const outcrop = smoothstep(0.1, 0.5, pn + this.n4.noise(x / 60, z / 60) * 0.35);
+      layer(SURF.ROCK, rc, o.wHigh * outcrop * 0.75);
       layer(SURF.ROCK, rc, o.wHigh * smoothstep(1900, 2700, h + pn * 300));
     }
     if (o.wPre > 0.01) {

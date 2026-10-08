@@ -179,7 +179,20 @@ export class Renderer {
   render(f) {
     const gl = this.gl;
     const e = f.env;
-    const width = Math.max(1, Math.round(f.width * this.Q.scale)), height = Math.max(1, Math.round(f.height * this.Q.scale));
+    // dynamic resolution: keep frame times near budget on weaker GPUs
+    if (f.dt > 0 && !f.noDynRes) {
+      this.ft = this.ft === undefined ? f.dt : this.ft * 0.95 + f.dt * 0.05;
+      this.dynCool = (this.dynCool || 0) - f.dt;
+      if (this.dynCool <= 0) {
+        const s0 = this.dynScale ?? 1;
+        if (this.ft > 1 / 40 && s0 > 0.55) this.dynScale = s0 - 0.05;
+        else if (this.ft < 1 / 58 && s0 < 1) this.dynScale = Math.min(1, s0 + 0.05);
+        if (this.dynScale !== s0) this.dynCool = 1.0;
+      }
+    }
+    const sc = this.Q.scale * (this.dynScale ?? 1);
+    this.renderScale = sc;
+    const width = Math.max(1, Math.round(f.width * sc)), height = Math.max(1, Math.round(f.height * sc));
     this.stats.draws = 0;
     m4.perspective(this.proj, f.fov, width / height, NEAR, f.far);
     m4.lookAt(this.view, [0, 0, 0], f.camDir, [0, 1, 0]);
