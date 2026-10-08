@@ -319,7 +319,7 @@ class Game {
     this.rally = new Rally(this.world, this.terrain, mode);
     this.vehicle = new Vehicle();
     this.vehicle.tractionAssist = this.settings.tcs;
-    this.vehicle.fuel = 100;
+    this.vehicle.fuel = SPEC.tank;
     this.fauna = new FaunaSystem(this.world, this.terrain, this.env);
     this.fauna.setNests(this.nests);
     this.fauna.onSpot = (sp) => this.discover('fauna', sp);

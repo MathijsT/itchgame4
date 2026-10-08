@@ -4,6 +4,7 @@
 import { formatTime } from '../race/rally.js';
 import { SURFACES } from '../world/surfaces.js';
 import { ROAD } from '../world/route.js';
+import { SPEC } from '../vehicle/vehicle.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = 180 / Math.PI;
@@ -146,7 +147,7 @@ export class Hud {
     el['h-region'].textContent = s.regionName;
     // ---- dash
     el['h-gear'].textContent = v.gear === -1 ? 'R' : v.gear === 0 ? 'N' : String(v.gear);
-    el['h-fuel'].style.width = `${(v.fuel / 110) * 100}%`;
+    el['h-fuel'].style.width = `${(v.fuel / SPEC.tank) * 100}%`;
     el['h-fuel'].style.background = v.fuel < 15 ? 'var(--bad)' : '';
     el['h-fuel-t'].textContent = `${Math.round(v.fuel)} L`;
     const et = v.engineTemp;

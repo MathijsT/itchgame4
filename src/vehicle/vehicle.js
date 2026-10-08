@@ -58,7 +58,7 @@ export const SPEC = {
   maxBrake: 3600,      // N·m per wheel
   diffLock: 900,       // driveline coupling, N·m per rad/s of speed difference
   cda: 1.25,
-  tank: 110,
+  tank: 90,
   speedLimit: 47.2,    // FIA rally-raid limiter 170 km/h
   // chassis collision points (body frame)
   hull: [
@@ -571,7 +571,8 @@ export class Vehicle {
       this.engineHealth = Math.max(0, this.engineHealth - (this.engineTemp - 128) * 0.0015 * dt);
     }
     // fuel: brake-specific consumption from power, scaled for the compressed map
-    const fuelRate = (P / 1000) * 0.25 / 0.74 / 3600 * 3.0 + 0.0009;
+    // brake-specific consumption, scaled ×9 because the map compresses rally distances
+    const fuelRate = (P / 1000) * 0.25 / 0.74 / 3600 * 9.0 + 0.002;
     this.fuel = Math.max(0, this.fuel - fuelRate * dt);
     if (this.fuel <= 0) this.powerFactor = 0;
     // filter clogs in dust storms and while ploughing sand

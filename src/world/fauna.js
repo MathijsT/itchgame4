@@ -163,7 +163,7 @@ export class FaunaSystem {
       if (dist > 750) { if (a.tree) this.treeGoatTrees.delete(a.tree); continue; }
       const sp = a.sp;
       if (sp.kind === 'flyer') this._fly(a, dt, wind);
-      else this._walk(a, dt, dist, dx, dz, pv);
+      else this._walk(a, dt, dist, dx, dz, pv, player.forward);
       keep.push(a);
     }
     this.agents = keep;
@@ -187,7 +187,7 @@ export class FaunaSystem {
     }
   }
 
-  _walk(a, dt, dist, dx, dz, pv) {
+  _walk(a, dt, dist, dx, dz, pv, fwd) {
     const sp = a.sp;
     const t = this.terrain;
     if (a.state === 'perch') {
@@ -198,11 +198,17 @@ export class FaunaSystem {
       return;
     }
     // flee from the vehicle when it comes close, or fast
-    const threat = dist < sp.flee && (pv > 2.5 || dist < sp.flee * 0.35);
+    // animals react to a fast approach (time to contact), not just distance
+    const reach = Math.max(sp.flee, pv * 3.2);
+    const threat = dist < reach && (pv > 2.5 || dist < sp.flee * 0.35);
     if (threat && a.state !== 'flee') {
       a.state = 'flee';
       a.timer = 4 + Math.random() * 4;
-      a.fleeDir = Math.atan2(dx, dz) + (Math.random() - 0.5) * 0.9;
+      // bolt sideways out of the vehicle's path (on the side it is already on), and away
+      const side = Math.sign(fwd[0] * dz - fwd[2] * dx) || 1;
+      const sx = -fwd[2] * side, sz = fwd[0] * side;
+      const l = Math.hypot(dx, dz) || 1;
+      a.fleeDir = Math.atan2(sx * 0.85 + (dx / l) * 0.5, sz * 0.85 + (dz / l) * 0.5) + (Math.random() - 0.5) * 0.4;
     }
     a.timer -= dt;
     let targetSpeed = 0, targetYaw = a.yaw;
@@ -210,7 +216,7 @@ export class FaunaSystem {
       targetSpeed = sp.run;
       targetYaw = a.fleeDir;
       a.head = 0;
-      if (a.timer <= 0 && dist > sp.flee) { a.state = 'idle'; a.timer = 2 + Math.random() * 4; a.hx = a.x; a.hz = a.z; }
+      if (a.timer <= 0 && dist > reach) { a.state = 'idle'; a.timer = 2 + Math.random() * 4; a.hx = a.x; a.hz = a.z; }
     } else if (a.state === 'idle') {
       a.head = Math.min(1, a.head + dt * 1.5); // grazing / foraging
       if (a.timer <= 0) {
@@ -240,7 +246,7 @@ export class FaunaSystem {
     a.phase += (a.speed / Math.max(sp.stride * a.scale, 0.1)) * Math.PI * dt;
     a.amp = clamp(a.speed / (sp.stride * a.scale * 3), 0, 0.55);
     // vehicle strike (animals usually get out of the way)
-    if (dist < 2.6 && pv > 4 && !a.struck) {
+    if (dist < 2.0 && pv > 4 && !a.struck) {
       a.struck = true;
       a.state = 'flee'; a.timer = 6; a.fleeDir = Math.atan2(dx, dz);
       if (this.onStrike) this.onStrike(sp);

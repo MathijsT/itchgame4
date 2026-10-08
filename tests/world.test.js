@@ -46,3 +46,14 @@ test('every species has a field-guide entry and a model', () => {
     assert.ok(m.count > 0 && !m.pos.some(Number.isNaN), sp.id);
   }
 });
+
+test('every stage start line is level and on the road', () => {
+  const r = new Rally(world, terrain, 'rally');
+  for (let i = 0; i < r.stages.length; i++) {
+    const p = r.startPose(i);
+    const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw);
+    const h = (a, b) => terrain.height(p.x + fx * a + fz * b, p.z + fz * a - fx * b);
+    const pitch = Math.abs(h(2, 0) - h(-2, 0)) / 4, roll = Math.abs(h(0, 1) - h(0, -1)) / 2;
+    assert.ok(pitch < 0.12 && roll < 0.06, `stage ${i + 1} start: pitch ${pitch.toFixed(3)} roll ${roll.toFixed(3)}`);
+  }
+});

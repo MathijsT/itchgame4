@@ -111,8 +111,10 @@ export class MoroccoTerrain {
         pl.x = a.x + a.tz * off; pl.z = a.z - a.tx * off;
         pl.routeS = t.s;
       }
-      const q = this.route.near(pl.x, pl.z);
-      pl.h = q.d < pl.r + 40 && q.type !== ROAD.NONE ? q.h : this._base(pl.x, pl.z, this._o);
+      // pads beside the road sit at road level so the two blend without a step
+      const t = this.route.track(pl.x, pl.z);
+      const rp = this.route.at(t.s);
+      pl.h = t.d < pl.r + 70 && rp.type !== ROAD.NONE ? rp.h : this._base(pl.x, pl.z, this._o);
       return pl;
     });
   }
@@ -268,6 +270,17 @@ export class MoroccoTerrain {
       if (d < hw) ford = { surf: rq.h, d, hw };
       o.river = Math.max(o.river, 1 - smoothstep(hw, hw + 4, d));
     }
+    // flatten village / bivouac pads
+    for (let i = 0; i < this.places.length; i++) {
+      const p = this.places[i];
+      const dx = x - p.x, dz = z - p.z;
+      const r2 = (p.r + 40) * (p.r + 40);
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      const w = 1 - smoothstep(p.r * 0.75, p.r + 40, Math.sqrt(d2));
+      h = lerp(h, p.h, w);
+      o.pad = Math.max(o.pad, w);
+    }
     // road: cut & fill with embankment width growing with height difference;
     // it overrides river banks so the carriageway stays on its profile
     if (q.d < 72 && q.type !== ROAD.NONE) {
@@ -284,17 +297,6 @@ export class MoroccoTerrain {
       const fd = 0.42 * (1 - (ford.d / ford.hw) * (ford.d / ford.hw));
       h = Math.min(h, ford.surf - fd - 0.02);
       o.water = Math.max(0, ford.surf - h);
-    }
-    // flatten village / bivouac pads
-    for (let i = 0; i < this.places.length; i++) {
-      const p = this.places[i];
-      const dx = x - p.x, dz = z - p.z;
-      const r2 = (p.r + 40) * (p.r + 40);
-      const d2 = dx * dx + dz * dz;
-      if (d2 > r2) continue;
-      const w = 1 - smoothstep(p.r * 0.75, p.r + 40, Math.sqrt(d2));
-      h = lerp(h, p.h, w);
-      o.pad = Math.max(o.pad, w);
     }
     o.h = h;
     return h;
