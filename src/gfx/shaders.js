@@ -107,7 +107,7 @@ vec3 aerial(vec3 col, vec3 rel) {
   float rD = avgDensity(max(h0 - uAtmo.z, 0.0), max(h1 - uAtmo.z, 0.0), 900.0) * uAtmo.y;
   vec3 od = (BETA_R * rR + vec3(8.4e-6 * rM) + rD * (2.0e-4 + 1.6e-4 * uDustTint)) * dist;
   // low valley mist (Atlas mornings): white, thick, hugging the valley floors
-  float mist = uMist.x * avgDensity(max(h0 - uMist.y + 400.0, 0.0), max(h1 - uMist.y + 400.0, 0.0), 120.0) * dist;
+  float mist = uMist.x * avgDensity(max(h0 - uMist.y + 400.0, 0.0), max(h1 - uMist.y + 400.0, 0.0), 90.0) * dist;
   vec3 T = exp(-od);
   vec3 sky = skyRadiance(normalize(vec3(dir.x, clamp(dir.y, 0.0, 0.08) + 0.01, dir.z)));
   vec3 c = col * T + sky * (1.0 - T);
@@ -360,6 +360,7 @@ in vec3 vRel; in vec3 vNrm; in vec3 vCol; in vec2 vUV; in float vH;
 uniform float uSpec;
 uniform int uKind;
 uniform int uWall;
+uniform int uA2C;
 uniform float uHeight;
 uniform sampler2D uFoliage;
 uniform highp sampler2DArray uGround;
@@ -372,8 +373,13 @@ void main() {
     float tile = floor(vUV.x);
     vec2 uv = vec2((mod(tile, 4.0) + fract(vUV.x)) / 4.0, (1.0 - floor(tile / 4.0) + clamp(vUV.y, 0.002, 0.998)) / 2.0);
     vec4 t = texture(uFoliage, uv);
-    // keep alpha-tested edges crisp across mip levels
-    alpha = (t.a - 0.45) / max(fwidth(t.a), 1e-4) + 0.5;
+    // mip levels average coverage away: boost alpha with the mip level so distant
+    // crowns stay dense, then sharpen the alpha-test edge
+    vec2 ts = uv * vec2(1024.0, 512.0);
+    vec2 ddx = dFdx(ts), ddy = dFdy(ts);
+    float lod = max(0.0, 0.5 * log2(max(dot(ddx, ddx), dot(ddy, ddy))));
+    float a = t.a * (1.0 + lod * 0.4);
+    alpha = (a - 0.45) / max(fwidth(a), 1e-4) + 0.5;
     if (alpha < 0.02) discard;
     tex = t.rgb;
   }
@@ -381,8 +387,10 @@ void main() {
   outColor = vec4(1.0);
 #else
   if (uKind == 0) {
-    float d = length(vRel);
-    if (d < 4.5 && hash12(gl_FragCoord.xy) > smoothstep(1.5, 4.5, d)) discard;
+    // fade plants right in front of the camera (smoothly with alpha-to-coverage)
+    float fade = smoothstep(1.5, 4.5, length(vRel));
+    if (uA2C == 1) alpha *= fade;
+    else if (hash12(gl_FragCoord.xy) > fade) discard;
   }
   vec3 n = normalize(vNrm);
   bool card = vUV.x >= 0.0;
@@ -723,7 +731,7 @@ void main() {
   float dz = sceneD - length(vRel);
   a *= clamp(dz / 1.5, 0.0, 1.0) * smoothstep(0.3, 1.5, length(vRel));
   if (a < 0.003) discard;
-  vec3 albedo = toLinear(vColor.rgb);
+  vec3 albedo = toLinear(vColor.rgb) * 1.25;
   vec3 v = normalize(vRel);
   float ph = hg(dot(v, uSunDir), 0.55) * 4.0 * PI;
   vec3 c = albedo * (uSunColor / PI * (0.35 + ph * 0.5) * cloudShadow(vRel + uCamPos) + skyAmbient(vec3(0, 1, 0)));

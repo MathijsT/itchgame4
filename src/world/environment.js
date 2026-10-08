@@ -143,7 +143,7 @@ export class Environment {
     this.cloudOffset[1] += (this.wind[1] * 2.5 + 3) * dt * this.timeScale * 0.15;
     // --- valley mist on cool mountain mornings
     const morning = smoothstep(4.5, 6.5, this.hour) * (1 - smoothstep(8.5, 10.5, this.hour));
-    this.mist = [0.008 * morning * mountain * (1 - this.storm), this.groundAlt - 60 + 400];
+    this.mist = [0.0011 * morning * mountain * (1 - this.storm), this.groundAlt - 40 + 400];
 
     // --- grading inputs: heat shimmer, warmth of the light
     this.heat = smoothstep(24, 38, this.temp) * day * clamp(desert + zn.wPre * 0.5, 0, 1) * (1 - this.storm);

@@ -228,7 +228,9 @@ export class Renderer {
       if (!b.count) continue;
       pi.set('uKind', b.kind); pi.set('uSway', b.sway); pi.set('uHeight', b.mesh.height || 1); pi.set('uSpec', b.spec);
       pi.set('uWall', b.wall);
-      if (msaa && b.mesh.hasCards) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
+      const a2c = msaa && b.mesh.hasCards;
+      pi.set('uA2C', a2c ? 1 : 0);
+      if (a2c) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       gl.bindVertexArray(b.vao);
       if (b.stride < 12) gl.vertexAttrib4f(LOC.I2, 0, 0, 0, 0);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, b.mesh.count, b.count);

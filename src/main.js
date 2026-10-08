@@ -52,7 +52,7 @@ class Game {
     this.input = new Input();
     this.audio = new GameAudio();
     this.audio.volume = this.settings.volume;
-    this.particles = new Particles(this.settings.quality === 'low' ? 1200 : 3000);
+    this.particles = new Particles(this.settings.quality === "low" ? 1500 : 4000);
     this.camera = new GameCamera();
     const startAudio = () => this.audio.start();
     window.addEventListener('pointerdown', startAudio);
@@ -700,13 +700,13 @@ class Game {
       const spin = Math.abs(w.slipSpeed);
       const k = s.dust * (clamp((v.speed - 2) / 18, 0, 1.4) + clamp(spin / 6, 0, 1.5)) * q;
       if (k <= 0.02) continue;
-      const n = k * 60 * dt * 1.2;
+      const n = k * 60 * dt * 0.9;
       const cnt = Math.floor(n) + (Math.random() < n % 1 ? 1 : 0);
       const c = s.dustColor;
       for (let i = 0; i < cnt; i++) {
         P.emit(cp[0] + (Math.random() - 0.5) * 0.6, cp[1] + 0.15, cp[2] + (Math.random() - 0.5) * 0.6,
           -v.vel[0] * 0.15 + (Math.random() - 0.5) * 2, 0.8 + Math.random() * 1.8, -v.vel[2] * 0.15 + (Math.random() - 0.5) * 2,
-          1.6 + Math.random() * 2.4, 0.35 + Math.random() * 0.3, 1.1 + k * 0.6, c[0], c[1], c[2], 0.07 + 0.1 * Math.min(1, k));
+          2.5 + Math.random() * 3.5, 0.6 + Math.random() * 0.5, 2.2 + k * 1.8, c[0], c[1], c[2], 0.16 + 0.18 * Math.min(1, k));
       }
     }
     // wind-blown sand: streamers near the ground in a dust storm or strong desert wind
