@@ -137,7 +137,8 @@ export class Environment {
 
     // --- clouds: Atlas cumulus vs thin high desert cloud; they drift with upper winds
     const mountain = zn.wMid + zn.wHigh;
-    this.cloud = [this.clouds, 4300 + desert * 1800, 900 + mountain * 900, 0.8];
+    this.cloud = [this.clouds < 0.08 ? 0 : this.clouds, 3900 + desert * 1800, 650 + mountain * 650, 0.75];
+    this.cirrus = clamp(0.15 + desert * 0.35 + this.noise.noise(this.t * 0.002, 9.1) * 0.25, 0, 0.7) * (1 - this.storm);
     this.cloudOffset[0] += (this.wind[0] * 2.5 + 6) * dt * this.timeScale * 0.15;
     this.cloudOffset[1] += (this.wind[1] * 2.5 + 3) * dt * this.timeScale * 0.15;
     // --- valley mist on cool mountain mornings

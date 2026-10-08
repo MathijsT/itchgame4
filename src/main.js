@@ -133,7 +133,8 @@ class Game {
     }
     this.structBatches = [];
     for (const [type, arr] of Object.entries(byType)) {
-      const b = new InstancedBatch(gl, new GpuMesh(gl, STRUCTURE_MODELS[type]().build()), 8, { kind: 0 });
+      const wall = type === 'house' || type === 'kasbah' || type === 'well';
+      const b = new InstancedBatch(gl, new GpuMesh(gl, STRUCTURE_MODELS[type]().build()), 8, { kind: 0, wall });
       b.update(new Float32Array(arr));
       this.structBatches.push(b);
     }
@@ -359,6 +360,7 @@ class Game {
     v.events.length = 0;
     this.camera.snap = true;
     this.camera.headingSmooth = yaw;
+    this.renderer.post.lumInit = true; // eyes adapt instantly after a jump
   }
 
   showBriefing() {

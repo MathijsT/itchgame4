@@ -64,16 +64,32 @@ vec3 skyAmbient(vec3 n) {
 }
 
 // ---- clouds (shared by sky and cloud shadows)
+float cloudBase(vec2 p) {
+  vec2 q = p + uCloudOff;
+  return noiseTex(q / 21000.0).r * 0.6 + noiseTex(q / 6500.0 + 0.31).a * 0.3 + noiseTex(q / 2100.0 + 0.7).r * 0.1;
+}
+// local coverage 0..1 (how tall the cumulus grows here)
 float cloudCover(vec2 p) {
-  vec2 q = (p + uCloudOff);
-  float n = noiseTex(q / 11000.0).r * 0.62 + noiseTex(q / 3300.0 + 0.37).a * 0.28 + noiseTex(q / 900.0).r * 0.10;
   float c = uCloud.x;
-  return smoothstep(1.0 - c, 1.0 - c + 0.28, n);
+  return clamp((cloudBase(p) - (1.0 - c)) / max(c * 0.75, 0.04), 0.0, 1.0);
+}
+float cumulus(vec3 p, bool fine) {
+  float hf = (p.y - uCloud.y) / uCloud.z;
+  if (hf < 0.0 || hf > 1.0) return 0.0;
+  float cov = cloudCover(p.xz);
+  // flat base, rounded top whose height grows with coverage
+  float shape = cov - hf * hf * 1.05 - (1.0 - smoothstep(0.0, 0.08, hf)) * 0.4;
+  if (shape <= 0.0) return 0.0;
+  if (!fine) return shape;
+  // pseudo-3D billows: noise on three planes so detail varies with height too
+  vec3 q = (p + vec3(uCloudOff.x, 0.0, uCloudOff.y)) / 1300.0;
+  float billow = (noiseTex(q.xz).g + noiseTex(q.xy + 0.37).g + noiseTex(q.zy + 0.71).g) / 3.0;
+  return clamp(shape - billow * 0.45 * (1.0 - shape * 0.6), 0.0, 1.0);
 }
 float cloudShadow(vec3 wp) {
   if (uCloud.x <= 0.0 || uSunDir.y <= 0.02) return 1.0;
-  vec2 p = wp.xz + uSunDir.xz / uSunDir.y * (uCloud.y + uCloud.z * 0.4 - wp.y);
-  return 1.0 - cloudCover(p) * uCloud.w;
+  vec2 p = wp.xz + uSunDir.xz / uSunDir.y * (uCloud.y + uCloud.z * 0.3 - wp.y);
+  return 1.0 - smoothstep(0.0, 0.25, cloudCover(p)) * uCloud.w;
 }
 
 // ---- aerial perspective: physically based extinction + sky in-scattering
@@ -343,7 +359,10 @@ ${COMMON}
 in vec3 vRel; in vec3 vNrm; in vec3 vCol; in vec2 vUV; in float vH;
 uniform float uSpec;
 uniform int uKind;
+uniform int uWall;
+uniform float uHeight;
 uniform sampler2D uFoliage;
+uniform highp sampler2DArray uGround;
 out vec4 outColor;
 void main() {
   float alpha = 1.0;
@@ -369,9 +388,20 @@ void main() {
   bool card = vUV.x >= 0.0;
   if (!gl_FrontFacing && !card) n = -n;
   vec3 albedo = toLinear(vCol * tex);
-  float sh = shadowAt(vRel, n);
-  // foliage self-occlusion: darker towards the base and inside the crown
   float ao = card ? mix(0.45, 1.0, vH) : 0.9;
+  if (uWall == 1) {
+    // rammed-earth (pisé) walls: tri-planar earth texture, lift lines, rain streaks, damp base
+    vec3 wp = vRel + uCamPos;
+    vec3 tw = abs(n); tw /= tw.x + tw.y + tw.z;
+    vec4 e = texture(uGround, vec3(wp.zy / 2.2, 2.0)) * tw.x + texture(uGround, vec3(wp.xy / 2.2, 2.0)) * tw.z + texture(uGround, vec3(wp.xz / 2.2, 2.0)) * tw.y;
+    float lifts = smoothstep(0.0, 0.06, abs(fract(wp.y / 0.85) - 0.5) - 0.44);
+    float streak = noiseTex(vec2(wp.x * 0.6 + wp.z * 0.6, wp.y * 0.05)).r;
+    albedo *= (0.65 + e.r * 0.7) * (1.0 - lifts * 0.18) * (0.85 + streak * 0.3);
+    float hb = vH * uHeight;
+    albedo *= mix(0.72, 1.0, smoothstep(0.0, 0.9, hb));
+    ao *= mix(0.7, 1.0, smoothstep(0.0, 2.0, hb));
+  }
+  float sh = shadowAt(vRel, n);
   vec3 c = shade(albedo, n, vRel, sh, ao, 0.8, uSpec);
   if (card) {
     // light through leaves: thin foliage glows when backlit by the sun
@@ -475,6 +505,7 @@ uniform float uStars;
 uniform vec3 uSunDisk;    // radiance of the sun disk (transmitted), zero at night
 uniform vec3 uMoonDir;
 uniform int uCloudSteps;
+uniform float uCirrus;
 in vec2 vNdc;
 out vec4 outColor;
 float hg(float c, float g) { return (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * c, 1.5)); }
@@ -507,45 +538,52 @@ void main() {
     c += vec3(0.9, 0.92, 0.95) * moon * crater * 0.4 * uStars;
     c += vec3(0.5, 0.6, 0.8) * pow(max(md, 0.0), 300.0) * 0.0015 * uStars;
   }
-  // clouds: march a slab between base and base + thickness
-  if (uCloud.x > 0.0 && dir.y > 0.005) {
+  // high cirrus: wind-combed streaks on a thin layer, lit by the sun
+  if (uCirrus > 0.0 && dir.y > 0.01) {
+    float t = (9500.0 - uCamPos.y) / dir.y;
+    vec2 q = (uCamPos.xz + dir.xz * t + uCloudOff * 1.6) / 1000.0;
+    vec2 w = normalize(uWind.xy + vec2(0.3, 0.1));
+    vec2 sq = vec2(dot(q, w) / 18.0, dot(q, vec2(-w.y, w.x)) / 2.2);
+    float n = noiseTex(sq).r * 0.6 + noiseTex(sq * 3.1 + 0.2).a * 0.3 + noiseTex(q / 9.0).r * 0.4;
+    float ci = smoothstep(0.52, 0.85, n) * uCirrus * smoothstep(0.01, 0.12, dir.y);
+    vec3 cc = uSunColor * (0.02 + hg(dot(dir, uSunDir), 0.7) * 0.15) + skyRadiance(vec3(0, 1, 0)) * 1.2;
+    c = mix(c, cc, ci * 0.55);
+  }
+  // cumulus: march the cloud slab
+  if (uCloud.x > 0.0 && dir.y > 0.003) {
     float b0 = uCloud.y, b1 = uCloud.y + uCloud.z;
-    float t0 = (b0 - uCamPos.y) / dir.y, t1 = (b1 - uCamPos.y) / dir.y;
-    if (t0 > 0.0) {
-      int N = uCloudSteps;
-      float dt = (t1 - t0) / float(N);
-      float T = 1.0;
-      vec3 L = vec3(0.0);
-      float cosT = dot(dir, uSunDir);
-      float phase = mix(hg(cosT, 0.6), hg(cosT, -0.2), 0.3);
-      vec3 amb = skyRadiance(vec3(0.0, 1.0, 0.0)) * 1.4;
-      float jitter = hash12(gl_FragCoord.xy + fract(uTime));
-      for (int i = 0; i < 24; i++) {
-        if (i >= N) break;
-        float t = t0 + (float(i) + jitter) * dt;
-        vec3 p = uCamPos + dir * t;
-        float hf = (p.y - b0) / uCloud.z;
-        float profile = smoothstep(0.0, 0.2, hf) * smoothstep(1.0, 0.45, hf);
-        float cov = cloudCover(p.xz);
-        float erode = noiseTex(p.xz / 700.0 + p.y / 2000.0).g;
-        float dens = max(cov * profile - erode * 0.35, 0.0) * 0.0045;
-        if (dens <= 0.0) continue;
-        // light toward the sun: one tap above for self-shadowing
-        vec3 q = p + uSunDir * (uCloud.z * 0.35);
-        float hq = (q.y - b0) / uCloud.z;
-        float dl = max(cloudCover(q.xz) * smoothstep(1.0, 0.45, hq) - 0.15, 0.0) * 0.0045 * uCloud.z * 0.6;
-        float beer = exp(-dl * 2.0);
-        float powder = 1.0 - exp(-dens * dt * 4.0);
-        vec3 S = (uSunColor * beer * phase * (0.5 + powder) * 2.2 + amb * (0.35 + 0.65 * hf)) * dens;
-        float Ts = exp(-dens * dt);
-        L += T * S * (1.0 - Ts) / dens;
-        T *= Ts;
-        if (T < 0.02) break;
-      }
-      // distant clouds melt into the haze
-      float fade = exp(-t0 / 60000.0);
-      c = mix(c, c * T + L, fade * smoothstep(0.005, 0.06, dir.y));
+    float t0 = max((b0 - uCamPos.y) / dir.y, 0.0), t1 = (b1 - uCamPos.y) / dir.y;
+    // cap the march: grazing rays through the slab would otherwise take km-long steps
+    t1 = min(t1, t0 + 7000.0);
+    int N = uCloudSteps;
+    float dt = (t1 - t0) / float(N);
+    float T = 1.0;
+    vec3 L = vec3(0.0);
+    float cosT = dot(dir, uSunDir);
+    float phase = mix(hg(cosT, 0.65), hg(cosT, -0.25), 0.35);
+    vec3 amb = skyRadiance(vec3(0.0, 1.0, 0.0)) * 1.6;
+    float jitter = hash12(gl_FragCoord.xy);
+    for (int i = 0; i < 32; i++) {
+      if (i >= N) break;
+      float t = t0 + (float(i) + jitter) * dt;
+      vec3 p = uCamPos + dir * t;
+      float d = cumulus(p, true);
+      if (d <= 0.0) continue;
+      float sigma = d * 0.006;
+      // light towards the sun: two taps for self-shadowing
+      float dl = cumulus(p + uSunDir * 120.0, false) + cumulus(p + uSunDir * 420.0, false) * 1.4;
+      float beer = exp(-dl * 0.006 * 300.0);
+      float powder = 1.0 - exp(-sigma * 600.0);
+      float hf = (p.y - b0) / uCloud.z;
+      vec3 S = (uSunColor * beer * phase * (0.4 + 0.6 * powder) * 3.0 + amb * (0.25 + 0.75 * hf)) * sigma;
+      float Ts = exp(-sigma * dt);
+      L += T * S * (1.0 - Ts) / sigma;
+      T *= Ts;
+      if (T < 0.02) break;
     }
+    // far clouds dissolve into the haze
+    float fade = exp(-t0 / 45000.0) * smoothstep(0.003, 0.05, dir.y);
+    c = mix(c, c * T + L, fade);
   }
   outColor = vec4(c, 1.0);
 }`;

@@ -44,6 +44,7 @@ export class InstancedBatch {
     this.gl = gl; this.mesh = mesh; this.stride = stride;
     this.kind = opts.kind ?? 0; this.sway = opts.sway ?? 0; this.spec = opts.spec ?? 0;
     this.castShadow = opts.castShadow ?? true;
+    this.wall = opts.wall ? 1 : 0;
     this.buf = gl.createBuffer();
     this.capacity = 0; this.count = 0;
     const B = stride * 4;
@@ -70,9 +71,9 @@ const SHADOW_SIZE = 2048;
 const NEAR = 0.3;
 
 const QUALITY = {
-  low: { cascades: 0, msaa: 0, bloom: true, rays: false, cloudSteps: 8, scale: 0.8 },
-  medium: { cascades: 1, msaa: 2, bloom: true, rays: true, cloudSteps: 10, scale: 1 },
-  high: { cascades: 2, msaa: 4, bloom: true, rays: true, cloudSteps: 16, scale: 1 },
+  low: { cascades: 0, msaa: 0, bloom: true, rays: false, cloudSteps: 10, scale: 0.8 },
+  medium: { cascades: 1, msaa: 2, bloom: true, rays: true, cloudSteps: 14, scale: 1 },
+  high: { cascades: 2, msaa: 4, bloom: true, rays: true, cloudSteps: 24, scale: 1 },
 };
 
 export class Renderer {
@@ -226,6 +227,7 @@ export class Renderer {
     for (const b of f.batches) {
       if (!b.count) continue;
       pi.set('uKind', b.kind); pi.set('uSway', b.sway); pi.set('uHeight', b.mesh.height || 1); pi.set('uSpec', b.spec);
+      pi.set('uWall', b.wall);
       if (msaa && b.mesh.hasCards) gl.enable(gl.SAMPLE_ALPHA_TO_COVERAGE);
       gl.bindVertexArray(b.vao);
       if (b.stride < 12) gl.vertexAttrib4f(LOC.I2, 0, 0, 0, 0);
@@ -255,6 +257,7 @@ export class Renderer {
     ps.set('uSunDisk', e.sunDisk);
     ps.set('uMoonDir', e.moonDir);
     ps.set('uCloudSteps', this.Q.cloudSteps);
+    ps.set('uCirrus', e.cirrus ?? 0);
     gl.bindVertexArray(this.emptyVao);
     gl.depthMask(false);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
